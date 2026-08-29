@@ -1,0 +1,290 @@
+export const WORKSPACE_VERSION = 1;
+export const CREATIVE_DIRECTION_VERSION = 1;
+
+const COLLECTIONS = ['projects', 'references', 'assets', 'targets', 'moments', 'selections', 'boards', 'signals'];
+const TARGET_KINDS = new Set(['reference', 'asset', 'region', 'frame', 'interaction']);
+const ASSET_KINDS = new Set(['image', 'video', 'url']);
+const SIGNAL_EVENTS = new Set(['capture', 'enrich', 'selection.create', 'board.change', 'export']);
+
+export class ValidationError extends Error {
+  constructor(issues) {
+    super('Workspace validation failed');
+    this.name = 'ValidationError';
+    this.issues = issues;
+  }
+}
+
+const copy = value => structuredClone(value);
+const now = () => new Date().toISOString();
+const id = prefix => `${prefix}_${crypto.randomUUID()}`;
+const required = (value, name) => {
+  if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${name} must be a non-empty string`);
+  return value.trim();
+};
+const optional = (value, name) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') throw new TypeError(`${name} must be a string`);
+  return value;
+};
+const stamp = (entity, timestamp = now()) => ({
+  ...Object.fromEntries(Object.entries(entity).filter(([, value]) => value !== undefined)),
+  createdAt: timestamp,
+  updatedAt: timestamp
+});
+const append = (workspace, collection, entity) => ({ ...copy(workspace), [collection]: [...workspace[collection], entity] });
+const find = (workspace, collection, entityId) => workspace[collection].find(item => item.id === entityId);
+const need = (workspace, collection, entityId) => {
+  const entity = find(workspace, collection, entityId);
+  if (!entity) throw new RangeError(`${collection} does not contain ${entityId}`);
+  return entity;
+};
+
+export function createWorkspace() {
+  return Object.fromEntries([['version', WORKSPACE_VERSION], ...COLLECTIONS.map(name => [name, []])]);
+}
+
+export function createProject(workspace, input) {
+  const timestamp = now();
+  return append(workspace, 'projects', stamp({ id: input.id ?? id('project'), title: required(input.title, 'title'), brief: optional(input.brief, 'brief') }, timestamp));
+}
+
+export function updateProject(workspace, projectId, changes) {
+  need(workspace, 'projects', projectId);
+  const allowed = { title: changes.title === undefined ? undefined : required(changes.title, 'title'), brief: changes.brief === undefined ? undefined : optional(changes.brief, 'brief') };
+  return update(workspace, 'projects', projectId, allowed);
+}
+
+export function createReference(workspace, input) {
+  need(workspace, 'projects', input.projectId);
+  return append(workspace, 'references', stamp({
+    id: input.id ?? id('reference'), projectId: input.projectId,
+    title: optional(input.title, 'title'), sourceUrl: optional(input.sourceUrl, 'sourceUrl'),
+    creator: optional(input.creator, 'creator'), notes: optional(input.notes, 'notes'),
+    capturedAt: input.capturedAt ?? now(), captureMethod: required(input.captureMethod ?? 'manual', 'captureMethod')
+  }));
+}
+
+export function updateReference(workspace, referenceId, changes) {
+  need(workspace, 'references', referenceId);
+  const allowed = {};
+  for (const field of ['title', 'sourceUrl', 'creator', 'notes']) if (field in changes) allowed[field] = optional(changes[field], field);
+  return update(workspace, 'references', referenceId, allowed);
+}
+
+export function createAsset(workspace, input) {
+  const reference = need(workspace, 'references', input.referenceId);
+  if (!ASSET_KINDS.has(input.kind)) throw new TypeError('kind must be image, video, or url');
+  return append(workspace, 'assets', stamp({
+    id: input.id ?? id('asset'), projectId: reference.projectId, referenceId: reference.id,
+    kind: input.kind, locator: required(input.locator, 'locator'), mediaType: optional(input.mediaType, 'mediaType'),
+    capturedAt: input.capturedAt ?? now(), provenance: copy(input.provenance ?? {})
+  }));
+}
+
+export function createTarget(workspace, input) {
+  const reference = need(workspace, 'references', input.referenceId);
+  if (!TARGET_KINDS.has(input.kind)) throw new TypeError('invalid target kind');
+  if (input.assetId) {
+    const asset = need(workspace, 'assets', input.assetId);
+    if (asset.referenceId !== reference.id) throw new RangeError('target asset must belong to its reference');
+  }
+  if (input.kind === 'asset' && !input.assetId) throw new TypeError('asset targets require assetId');
+  return append(workspace, 'targets', stamp({
+    id: input.id ?? id('target'), projectId: reference.projectId, referenceId: reference.id,
+    assetId: input.assetId, kind: input.kind, detail: copy(input.detail ?? {})
+  }));
+}
+
+export function createMoment(workspace, input) {
+  const target = need(workspace, 'targets', input.targetId);
+  if (input.start !== undefined && (!Number.isFinite(input.start) || input.start < 0)) throw new TypeError('start must be a non-negative number');
+  if (input.end !== undefined && (!Number.isFinite(input.end) || input.end < (input.start ?? 0))) throw new TypeError('end must be at least start');
+  return append(workspace, 'moments', stamp({
+    id: input.id ?? id('moment'), projectId: target.projectId, targetId: target.id,
+    label: optional(input.label, 'label'), start: input.start, end: input.end, state: copy(input.state ?? {})
+  }));
+}
+
+export function createSelection(workspace, input) {
+  const project = need(workspace, 'projects', input.projectId);
+  const target = need(workspace, 'targets', input.targetId);
+  if (project.id !== target.projectId) throw new RangeError('selection target must belong to its project');
+  if (input.momentId) {
+    const moment = need(workspace, 'moments', input.momentId);
+    if (moment.targetId !== target.id) throw new RangeError('selection moment must belong to its target');
+  }
+  return append(workspace, 'selections', stamp({
+    id: input.id ?? id('selection'), projectId: project.id, targetId: target.id,
+    momentId: input.momentId, aspect: required(input.aspect, 'aspect'), intent: required(input.intent, 'intent')
+  }));
+}
+
+export function createBoard(workspace, input) {
+  need(workspace, 'projects', input.projectId);
+  const selectionIds = [...(input.selectionIds ?? [])];
+  assertBoardSelections(workspace, input.projectId, selectionIds);
+  return append(workspace, 'boards', stamp({ id: input.id ?? id('board'), projectId: input.projectId, title: required(input.title, 'title'), selectionIds }));
+}
+
+export function reorderBoard(workspace, boardId, selectionIds) {
+  const board = need(workspace, 'boards', boardId);
+  if (selectionIds.length !== board.selectionIds.length || new Set(selectionIds).size !== selectionIds.length || board.selectionIds.some(item => !selectionIds.includes(item))) {
+    throw new RangeError('reorder must contain every board selection exactly once');
+  }
+  return update(workspace, 'boards', boardId, { selectionIds: [...selectionIds] });
+}
+
+export function removeFromBoard(workspace, boardId, selectionId) {
+  const board = need(workspace, 'boards', boardId);
+  return update(workspace, 'boards', boardId, { selectionIds: board.selectionIds.filter(item => item !== selectionId) });
+}
+
+export function recordSignal(workspace, input) {
+  need(workspace, 'projects', input.projectId);
+  if (!SIGNAL_EVENTS.has(input.event)) throw new TypeError('signal event is not factual or supported');
+  if (!input.subject || typeof input.subject.type !== 'string' || typeof input.subject.id !== 'string') throw new TypeError('signal subject is required');
+  if ('inference' in input || 'preference' in input) throw new TypeError('signals cannot contain inferred preferences');
+  return append(workspace, 'signals', stamp({
+    id: input.id ?? id('signal'), projectId: input.projectId, event: input.event,
+    subject: copy(input.subject), occurredAt: input.occurredAt ?? now(), facts: copy(input.facts ?? {})
+  }));
+}
+
+export function deleteReference(workspace, referenceId) {
+  need(workspace, 'references', referenceId);
+  const assetIds = new Set(workspace.assets.filter(x => x.referenceId === referenceId).map(x => x.id));
+  const targetIds = new Set(workspace.targets.filter(x => x.referenceId === referenceId).map(x => x.id));
+  const momentIds = new Set(workspace.moments.filter(x => targetIds.has(x.targetId)).map(x => x.id));
+  const selectionIds = new Set(workspace.selections.filter(x => targetIds.has(x.targetId) || momentIds.has(x.momentId)).map(x => x.id));
+  return {
+    ...copy(workspace), references: workspace.references.filter(x => x.id !== referenceId),
+    assets: workspace.assets.filter(x => !assetIds.has(x.id)), targets: workspace.targets.filter(x => !targetIds.has(x.id)),
+    moments: workspace.moments.filter(x => !momentIds.has(x.id)), selections: workspace.selections.filter(x => !selectionIds.has(x.id)),
+    boards: workspace.boards.map(board => ({ ...board, selectionIds: board.selectionIds.filter(x => !selectionIds.has(x)) })),
+    signals: workspace.signals.filter(x => !(x.subject.type === 'reference' && x.subject.id === referenceId))
+  };
+}
+
+export function deleteProject(workspace, projectId) {
+  need(workspace, 'projects', projectId);
+  return Object.fromEntries(Object.entries(workspace).map(([key, value]) => [key,
+    key === 'projects' ? value.filter(item => item.id !== projectId)
+      : COLLECTIONS.includes(key) ? value.filter(item => item.projectId !== projectId) : value
+  ]));
+}
+
+export function exportCreativeDirection(workspace, boardId) {
+  validateWorkspace(workspace);
+  const board = need(workspace, 'boards', boardId);
+  const project = need(workspace, 'projects', board.projectId);
+  const selections = board.selectionIds.map(selectionId => {
+    const selection = need(workspace, 'selections', selectionId);
+    const target = need(workspace, 'targets', selection.targetId);
+    const reference = need(workspace, 'references', target.referenceId);
+    return {
+      selection: copy(selection), target: copy(target),
+      moment: selection.momentId ? copy(need(workspace, 'moments', selection.momentId)) : null,
+      reference: copy(reference), asset: target.assetId ? copy(need(workspace, 'assets', target.assetId)) : null
+    };
+  });
+  return { format: 'refloom.creative-direction', version: CREATIVE_DIRECTION_VERSION, exportedAt: now(), project: copy(project), board: copy(board), selections };
+}
+
+export function exportBoardMarkdown(workspace, boardId) {
+  const data = exportCreativeDirection(workspace, boardId);
+  const lines = [`# ${data.board.title}`, '', `Project: ${data.project.title}`, ''];
+  if (data.project.brief) lines.push(data.project.brief, '');
+  for (const item of data.selections) {
+    lines.push(`## ${item.selection.aspect}`, '', `Intent: ${item.selection.intent}`, `Reference: ${item.reference.title ?? item.reference.sourceUrl ?? item.reference.id}`);
+    if (item.asset) lines.push(`Asset: ${item.asset.locator}`);
+    if (item.moment) lines.push(`Moment: ${item.moment.label ?? `${item.moment.start ?? ''}–${item.moment.end ?? ''}`}`);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+export function exportWorkspace(workspace) {
+  validateWorkspace(workspace);
+  return JSON.stringify(copy(workspace), null, 2);
+}
+
+export function importWorkspace(input) {
+  let parsed;
+  try { parsed = typeof input === 'string' ? JSON.parse(input) : copy(input); }
+  catch { throw new ValidationError([{ path: '$', message: 'invalid JSON' }]); }
+  validateWorkspace(parsed);
+  return copy(parsed);
+}
+
+export function validateWorkspace(workspace) {
+  const issues = [];
+  if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) throw new ValidationError([{ path: '$', message: 'must be an object' }]);
+  if (workspace.version !== WORKSPACE_VERSION) issues.push({ path: 'version', message: `must equal ${WORKSPACE_VERSION}` });
+  for (const collection of COLLECTIONS) if (!Array.isArray(workspace[collection])) issues.push({ path: collection, message: 'must be an array' });
+  if (issues.length) throw new ValidationError(issues);
+  for (const collection of COLLECTIONS) {
+    const seen = new Set();
+    workspace[collection].forEach((entity, index) => {
+      const path = `${collection}[${index}]`;
+      if (!entity || typeof entity !== 'object' || typeof entity.id !== 'string' || entity.id === '') issues.push({ path, message: 'must have an id' });
+      else if (seen.has(entity.id)) issues.push({ path: `${path}.id`, message: 'must be unique within collection' });
+      else seen.add(entity.id);
+    });
+  }
+  const exists = (collection, entityId, path) => {
+    const entity = workspace[collection].find(item => item.id === entityId);
+    if (!entity) issues.push({ path, message: `references missing ${collection} entity` });
+    return entity;
+  };
+  workspace.references.forEach((x, i) => exists('projects', x.projectId, `references[${i}].projectId`));
+  workspace.assets.forEach((x, i) => {
+    const ref = exists('references', x.referenceId, `assets[${i}].referenceId`);
+    if (ref && x.projectId !== ref.projectId) issues.push({ path: `assets[${i}].projectId`, message: 'must match reference project' });
+  });
+  workspace.targets.forEach((x, i) => {
+    const ref = exists('references', x.referenceId, `targets[${i}].referenceId`);
+    const asset = x.assetId ? exists('assets', x.assetId, `targets[${i}].assetId`) : undefined;
+    if (ref && x.projectId !== ref.projectId) issues.push({ path: `targets[${i}].projectId`, message: 'must match reference project' });
+    if (asset && asset.referenceId !== x.referenceId) issues.push({ path: `targets[${i}].assetId`, message: 'must belong to reference' });
+  });
+  workspace.moments.forEach((x, i) => {
+    const target = exists('targets', x.targetId, `moments[${i}].targetId`);
+    if (target && x.projectId !== target.projectId) issues.push({ path: `moments[${i}].projectId`, message: 'must match target project' });
+  });
+  workspace.selections.forEach((x, i) => {
+    const project = exists('projects', x.projectId, `selections[${i}].projectId`);
+    const target = exists('targets', x.targetId, `selections[${i}].targetId`);
+    const moment = x.momentId ? exists('moments', x.momentId, `selections[${i}].momentId`) : undefined;
+    if (project && target && project.id !== target.projectId) issues.push({ path: `selections[${i}].targetId`, message: 'must belong to selection project' });
+    if (moment && moment.targetId !== x.targetId) issues.push({ path: `selections[${i}].momentId`, message: 'must belong to selection target' });
+  });
+  workspace.boards.forEach((x, i) => {
+    exists('projects', x.projectId, `boards[${i}].projectId`);
+    if (!Array.isArray(x.selectionIds)) issues.push({ path: `boards[${i}].selectionIds`, message: 'must be an array' });
+    else {
+      if (new Set(x.selectionIds).size !== x.selectionIds.length) issues.push({ path: `boards[${i}].selectionIds`, message: 'must not contain duplicates' });
+      x.selectionIds.forEach((selectionId, j) => {
+        const selection = exists('selections', selectionId, `boards[${i}].selectionIds[${j}]`);
+        if (selection && selection.projectId !== x.projectId) issues.push({ path: `boards[${i}].selectionIds[${j}]`, message: 'must belong to board project' });
+      });
+    }
+  });
+  workspace.signals.forEach((x, i) => {
+    exists('projects', x.projectId, `signals[${i}].projectId`);
+    if (!SIGNAL_EVENTS.has(x.event)) issues.push({ path: `signals[${i}].event`, message: 'must be a supported factual event' });
+    if (!x.subject || typeof x.subject.type !== 'string' || typeof x.subject.id !== 'string') issues.push({ path: `signals[${i}].subject`, message: 'must identify an observed subject' });
+    if ('inference' in x || 'preference' in x) issues.push({ path: `signals[${i}]`, message: 'must not store inferred preferences' });
+  });
+  if (issues.length) throw new ValidationError(issues);
+  return true;
+}
+
+function update(workspace, collection, entityId, changes) {
+  const clean = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
+  return { ...copy(workspace), [collection]: workspace[collection].map(entity => entity.id === entityId ? { ...entity, ...copy(clean), id: entity.id, updatedAt: now() } : entity) };
+}
+
+function assertBoardSelections(workspace, projectId, selectionIds) {
+  if (new Set(selectionIds).size !== selectionIds.length) throw new RangeError('board selections must be unique');
+  for (const selectionId of selectionIds) if (need(workspace, 'selections', selectionId).projectId !== projectId) throw new RangeError('board selections must belong to its project');
+}
