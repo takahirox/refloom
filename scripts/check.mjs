@@ -5,7 +5,13 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const required = [
   'package.json',
+  'README.md',
+  'LICENSE',
+  'docs/ARCHITECTURE.md',
+  'docs/EXPORT_SCHEMA.md',
+  'docs/PRIVACY_SECURITY.md',
   'docs/PRODUCT_SLICE.md',
+  'docs/ROADMAP.md',
   'public/index.html',
   'public/styles.css',
   'server.mjs',
@@ -16,6 +22,7 @@ const required = [
   'test/domain.test.js',
   'test/storage.test.js',
   'test/ui-format.test.js',
+  'test/server.test.js',
   'scripts/check.mjs'
 ];
 

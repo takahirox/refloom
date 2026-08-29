@@ -131,6 +131,28 @@ test('import rejects malformed JSON, unsupported versions, and missing collectio
   assert.throws(() => importWorkspace(missing), error => error instanceof ValidationError && error.issues.some(x => x.path === 'assets'));
 });
 
+test('import rejects malformed entity shapes and missing required fields', () => {
+  const malformed = fixture();
+  malformed.projects[0].title = '';
+  malformed.references[0].captureMethod = 42;
+  malformed.assets[0].provenance = [];
+  malformed.targets[0].detail = null;
+  malformed.moments[0].start = -1;
+  malformed.selections[0].intent = undefined;
+  malformed.signals.push(null);
+  assert.throws(
+    () => importWorkspace(malformed),
+    error => error instanceof ValidationError
+      && error.issues.some(x => x.path === 'projects[0].title')
+      && error.issues.some(x => x.path === 'references[0].captureMethod')
+      && error.issues.some(x => x.path === 'assets[0].provenance')
+      && error.issues.some(x => x.path === 'targets[0].detail')
+      && error.issues.some(x => x.path === 'moments[0].start')
+      && error.issues.some(x => x.path === 'selections[0].intent')
+      && error.issues.some(x => x.path === 'signals[0]')
+  );
+});
+
 test('import rejects duplicate identifiers and dangling references', () => {
   const duplicate = fixture();
   duplicate.projects.push({ ...duplicate.projects[0] });

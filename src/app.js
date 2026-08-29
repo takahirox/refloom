@@ -9,10 +9,24 @@ import { displayReference, formatMoment, formatSignal, safeFilename } from './ui
 const $ = selector => document.querySelector(selector);
 const repository = new WorkspaceRepository();
 let workspace;
-let projectId = localStorage.getItem('refloom.project');
+let projectId = readStoredProject();
 let objectUrls = [];
 let statusTimer;
 let dialogReturnFocus;
+
+function readStoredProject() {
+  try { return globalThis.localStorage?.getItem('refloom.project') ?? undefined; }
+  catch { return undefined; }
+}
+
+function storeProject(value) {
+  try {
+    if (value) globalThis.localStorage?.setItem('refloom.project', value);
+    else globalThis.localStorage?.removeItem('refloom.project');
+  } catch {
+    // Project selection is a convenience only; IndexedDB remains authoritative.
+  }
+}
 
 function element(tag, options = {}, children = []) {
   const node = document.createElement(tag);
@@ -99,7 +113,7 @@ function projectEditor(project) {
       projectId = next.projects.at(-1).id;
       next = createBoard(next, { projectId, title: 'Creative direction' });
     }
-    localStorage.setItem('refloom.project', projectId);
+    storeProject(projectId);
     await commit(next, [], project ? 'Project updated' : 'Project created');
   });
 }
@@ -184,6 +198,7 @@ async function renderLibrary() {
   const cards = [];
   for (const reference of references) {
     const assets = workspace.assets.filter(asset => asset.referenceId === reference.id);
+    const previewAsset = assets.find(asset => blobIdFromLocator(asset.locator)) ?? assets[0];
     const edit = element('button', { type: 'button', text: 'Edit details' });
     edit.addEventListener('click', () => referenceEditor(reference));
     const add = element('button', { type: 'button', text: 'Add assets' });
@@ -196,7 +211,7 @@ async function renderLibrary() {
       await commit(deleteReference(workspace, reference.id), [], 'Reference deleted');
     });
     const card = element('article', { className: 'reference-card' }, [
-      await mediaPreview(assets[0]), element('h2', { text: displayReference(reference) }),
+      await mediaPreview(previewAsset), element('h2', { text: displayReference(reference) }),
       element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
       reference.notes ? element('p', { text: reference.notes }) : null,
       element('div', { className: 'actions' }, [edit, add, select, remove])
@@ -254,7 +269,7 @@ async function render() {
   for (const view of document.querySelectorAll('.view')) view.hidden = !project || view.id !== route;
   for (const link of document.querySelectorAll('nav a')) link.setAttribute('aria-current', link.hash === `#${route}` ? 'page' : 'false');
   if (!project) return;
-  localStorage.setItem('refloom.project', projectId);
+  storeProject(projectId);
   if (route === 'library') await renderLibrary();
   if (route === 'board') renderBoard();
   if (route === 'activity') renderActivity();
@@ -294,7 +309,7 @@ function bindEvents() {
   $('#backup').addEventListener('click', async () => { try { download('refloom-workspace-backup.json', await repository.exportBackup(workspace), 'application/json'); announce('Workspace backup downloaded'); } catch (error) { announce(error.message, true); } });
   $('#restore-file').addEventListener('change', async event => { try { if (!await confirmAction('Replace the current workspace with this backup?')) return; workspace = await repository.importBackup(await event.target.files[0].text()); projectId = workspace.projects[0]?.id; location.hash = 'library'; await render(); announce('Workspace restored'); } catch (error) { announce(`Import failed: ${error.message}`, true); } finally { event.target.value = ''; } });
   $('#delete-project').addEventListener('click', async () => { const project = activeProject(); if (!project || !await confirmAction(`Delete project “${project.title}” and all of its local data?`)) return; const next = deleteProject(workspace, project.id); projectId = next.projects[0]?.id; await commit(next, [], 'Project deleted'); });
-  $('#reset').addEventListener('click', async () => { if (!await confirmAction('Permanently reset every project, reference, binary, board, and activity record on this device?')) return; workspace = await repository.reset(); projectId = undefined; localStorage.removeItem('refloom.project'); location.hash = 'library'; await render(); announce('All local Refloom data was reset'); });
+  $('#reset').addEventListener('click', async () => { if (!await confirmAction('Permanently reset every project, reference, binary, board, and activity record on this device?')) return; workspace = await repository.reset(); projectId = undefined; storeProject(); location.hash = 'library'; await render(); announce('All local Refloom data was reset'); });
 }
 
 async function start() {

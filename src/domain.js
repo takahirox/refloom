@@ -222,36 +222,112 @@ export function validateWorkspace(workspace) {
   if (workspace.version !== WORKSPACE_VERSION) issues.push({ path: 'version', message: `must equal ${WORKSPACE_VERSION}` });
   for (const collection of COLLECTIONS) if (!Array.isArray(workspace[collection])) issues.push({ path: collection, message: 'must be an array' });
   if (issues.length) throw new ValidationError(issues);
+  const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const stringField = (entity, field, path, { optional: allowMissing = false } = {}) => {
+    const value = entity[field];
+    if (allowMissing && value === undefined) return;
+    if (typeof value !== 'string' || value.trim() === '') issues.push({ path: `${path}.${field}`, message: 'must be a non-empty string' });
+  };
+  const optionalString = (entity, field, path) => {
+    if (entity[field] !== undefined && typeof entity[field] !== 'string') issues.push({ path: `${path}.${field}`, message: 'must be a string when present' });
+  };
   for (const collection of COLLECTIONS) {
     const seen = new Set();
     workspace[collection].forEach((entity, index) => {
       const path = `${collection}[${index}]`;
-      if (!entity || typeof entity !== 'object' || typeof entity.id !== 'string' || entity.id === '') issues.push({ path, message: 'must have an id' });
+      if (!isRecord(entity)) issues.push({ path, message: 'must be an object' });
+      else if (typeof entity.id !== 'string' || entity.id.trim() === '') issues.push({ path: `${path}.id`, message: 'must be a non-empty string' });
       else if (seen.has(entity.id)) issues.push({ path: `${path}.id`, message: 'must be unique within collection' });
       else seen.add(entity.id);
+      if (isRecord(entity)) {
+        stringField(entity, 'createdAt', path);
+        stringField(entity, 'updatedAt', path);
+      }
     });
   }
+  workspace.projects.forEach((x, i) => {
+    if (!isRecord(x)) return;
+    stringField(x, 'title', `projects[${i}]`);
+    optionalString(x, 'brief', `projects[${i}]`);
+  });
+  workspace.references.forEach((x, i) => {
+    if (!isRecord(x)) return;
+    const path = `references[${i}]`;
+    stringField(x, 'projectId', path);
+    stringField(x, 'capturedAt', path);
+    stringField(x, 'captureMethod', path);
+    for (const field of ['title', 'sourceUrl', 'creator', 'notes']) optionalString(x, field, path);
+  });
+  workspace.assets.forEach((x, i) => {
+    if (!isRecord(x)) return;
+    const path = `assets[${i}]`;
+    stringField(x, 'projectId', path);
+    stringField(x, 'referenceId', path);
+    stringField(x, 'locator', path);
+    stringField(x, 'capturedAt', path);
+    if (!ASSET_KINDS.has(x.kind)) issues.push({ path: `${path}.kind`, message: 'must be image, video, or url' });
+    optionalString(x, 'mediaType', path);
+    if (!isRecord(x.provenance)) issues.push({ path: `${path}.provenance`, message: 'must be an object' });
+  });
+  workspace.targets.forEach((x, i) => {
+    if (!isRecord(x)) return;
+    const path = `targets[${i}]`;
+    stringField(x, 'projectId', path);
+    stringField(x, 'referenceId', path);
+    if (!TARGET_KINDS.has(x.kind)) issues.push({ path: `${path}.kind`, message: 'must be a supported target kind' });
+    if (x.kind === 'asset' && (typeof x.assetId !== 'string' || x.assetId === '')) issues.push({ path: `${path}.assetId`, message: 'is required for an asset target' });
+    if (x.assetId !== undefined && typeof x.assetId !== 'string') issues.push({ path: `${path}.assetId`, message: 'must be a string when present' });
+    if (!isRecord(x.detail)) issues.push({ path: `${path}.detail`, message: 'must be an object' });
+  });
+  workspace.moments.forEach((x, i) => {
+    if (!isRecord(x)) return;
+    const path = `moments[${i}]`;
+    stringField(x, 'projectId', path);
+    stringField(x, 'targetId', path);
+    optionalString(x, 'label', path);
+    if (x.start !== undefined && (!Number.isFinite(x.start) || x.start < 0)) issues.push({ path: `${path}.start`, message: 'must be a non-negative number when present' });
+    if (x.end !== undefined && (!Number.isFinite(x.end) || x.end < (x.start ?? 0))) issues.push({ path: `${path}.end`, message: 'must be a number at least as large as start' });
+    if (!isRecord(x.state)) issues.push({ path: `${path}.state`, message: 'must be an object' });
+  });
+  workspace.selections.forEach((x, i) => {
+    if (!isRecord(x)) return;
+    const path = `selections[${i}]`;
+    stringField(x, 'projectId', path);
+    stringField(x, 'targetId', path);
+    stringField(x, 'aspect', path);
+    stringField(x, 'intent', path);
+    if (x.momentId !== undefined && typeof x.momentId !== 'string') issues.push({ path: `${path}.momentId`, message: 'must be a string when present' });
+  });
+  workspace.boards.forEach((x, i) => {
+    if (!isRecord(x)) return;
+    stringField(x, 'projectId', `boards[${i}]`);
+    stringField(x, 'title', `boards[${i}]`);
+  });
   const exists = (collection, entityId, path) => {
-    const entity = workspace[collection].find(item => item.id === entityId);
+    const entity = workspace[collection].find(item => isRecord(item) && item.id === entityId);
     if (!entity) issues.push({ path, message: `references missing ${collection} entity` });
     return entity;
   };
-  workspace.references.forEach((x, i) => exists('projects', x.projectId, `references[${i}].projectId`));
+  workspace.references.forEach((x, i) => { if (isRecord(x)) exists('projects', x.projectId, `references[${i}].projectId`); });
   workspace.assets.forEach((x, i) => {
+    if (!isRecord(x)) return;
     const ref = exists('references', x.referenceId, `assets[${i}].referenceId`);
     if (ref && x.projectId !== ref.projectId) issues.push({ path: `assets[${i}].projectId`, message: 'must match reference project' });
   });
   workspace.targets.forEach((x, i) => {
+    if (!isRecord(x)) return;
     const ref = exists('references', x.referenceId, `targets[${i}].referenceId`);
     const asset = x.assetId ? exists('assets', x.assetId, `targets[${i}].assetId`) : undefined;
     if (ref && x.projectId !== ref.projectId) issues.push({ path: `targets[${i}].projectId`, message: 'must match reference project' });
     if (asset && asset.referenceId !== x.referenceId) issues.push({ path: `targets[${i}].assetId`, message: 'must belong to reference' });
   });
   workspace.moments.forEach((x, i) => {
+    if (!isRecord(x)) return;
     const target = exists('targets', x.targetId, `moments[${i}].targetId`);
     if (target && x.projectId !== target.projectId) issues.push({ path: `moments[${i}].projectId`, message: 'must match target project' });
   });
   workspace.selections.forEach((x, i) => {
+    if (!isRecord(x)) return;
     const project = exists('projects', x.projectId, `selections[${i}].projectId`);
     const target = exists('targets', x.targetId, `selections[${i}].targetId`);
     const moment = x.momentId ? exists('moments', x.momentId, `selections[${i}].momentId`) : undefined;
@@ -259,6 +335,7 @@ export function validateWorkspace(workspace) {
     if (moment && moment.targetId !== x.targetId) issues.push({ path: `selections[${i}].momentId`, message: 'must belong to selection target' });
   });
   workspace.boards.forEach((x, i) => {
+    if (!isRecord(x)) return;
     exists('projects', x.projectId, `boards[${i}].projectId`);
     if (!Array.isArray(x.selectionIds)) issues.push({ path: `boards[${i}].selectionIds`, message: 'must be an array' });
     else {
@@ -270,9 +347,13 @@ export function validateWorkspace(workspace) {
     }
   });
   workspace.signals.forEach((x, i) => {
+    if (!isRecord(x)) return;
+    stringField(x, 'projectId', `signals[${i}]`);
+    stringField(x, 'occurredAt', `signals[${i}]`);
     exists('projects', x.projectId, `signals[${i}].projectId`);
     if (!SIGNAL_EVENTS.has(x.event)) issues.push({ path: `signals[${i}].event`, message: 'must be a supported factual event' });
     if (!x.subject || typeof x.subject.type !== 'string' || typeof x.subject.id !== 'string') issues.push({ path: `signals[${i}].subject`, message: 'must identify an observed subject' });
+    if (!isRecord(x.facts)) issues.push({ path: `signals[${i}].facts`, message: 'must be an object' });
     if ('inference' in x || 'preference' in x) issues.push({ path: `signals[${i}]`, message: 'must not store inferred preferences' });
   });
   if (issues.length) throw new ValidationError(issues);
