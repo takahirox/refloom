@@ -3,7 +3,21 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
-const required = ['package.json', 'docs/PRODUCT_SLICE.md', 'src/domain.js', 'test/domain.test.js', 'scripts/check.mjs'];
+const required = [
+  'package.json',
+  'docs/PRODUCT_SLICE.md',
+  'public/index.html',
+  'public/styles.css',
+  'server.mjs',
+  'src/app.js',
+  'src/domain.js',
+  'src/storage.js',
+  'src/ui-format.js',
+  'test/domain.test.js',
+  'test/storage.test.js',
+  'test/ui-format.test.js',
+  'scripts/check.mjs'
+];
 
 for (const file of required) {
   try {
@@ -33,6 +47,19 @@ for (const file of await modules(root)) {
     child.once('exit', code => resolve(code ?? 1));
   });
   if (result !== 0) process.exitCode = 1;
+}
+
+const html = await import('node:fs/promises').then(fs => fs.readFile(path.join(root, 'public/index.html'), 'utf8'));
+const app = await import('node:fs/promises').then(fs => fs.readFile(path.join(root, 'src/app.js'), 'utf8'));
+const forbidden = [
+  ['innerHTML', /\.innerHTML\b/],
+  ['insertAdjacentHTML', /insertAdjacentHTML\s*\(/],
+  ['eval', /\beval\s*\(/],
+  ['inline event handlers', /\son[a-z]+\s*=/i]
+];
+for (const [label, pattern] of forbidden) if (pattern.test(`${html}\n${app}`)) {
+  console.error(`Forbidden rendering mechanism found: ${label}`);
+  process.exitCode = 1;
 }
 
 if (!process.exitCode) console.log('Repository check passed.');

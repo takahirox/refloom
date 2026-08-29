@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Refloom — local-first creative reference boards">
+  <title>Refloom</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/src/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="#library" aria-label="Refloom home">Refloom</a>
+    <button id="nav-toggle" class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-nav">Menu</button>
+    <nav id="primary-nav" aria-label="Primary">
+      <a href="#library">Library</a>
+      <a href="#board">Board</a>
+      <a href="#activity">Activity</a>
+      <a href="#data">Data</a>
+    </nav>
+    <label class="project-switcher">Project
+      <select id="project-select" aria-describedby="project-help"></select>
+    </label>
+    <span id="project-help" class="sr-only">Switch the active project</span>
+    <button id="new-project" class="primary" type="button">New project</button>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div id="fatal" class="fatal" role="alert" hidden></div>
+    <section id="welcome" class="hero" aria-labelledby="welcome-title" hidden>
+      <p class="eyebrow">Private by default · stored on this device</p>
+      <h1 id="welcome-title">Turn references into clear creative direction.</h1>
+      <p>Capture first, enrich later, and preserve exactly why each detail belongs on the board.</p>
+      <button id="welcome-create" class="primary" type="button">Create your first project</button>
+    </section>
+
+    <section id="library" class="view" aria-labelledby="library-title">
+      <div class="section-head"><div><p class="eyebrow">Capture first</p><h1 id="library-title">Reference library</h1></div><button id="edit-project" type="button">Edit project</button></div>
+      <p id="project-brief" class="lede"></p>
+      <div class="capture-grid">
+        <form id="url-form" class="panel">
+          <h2>Save a URL</h2>
+          <label for="capture-url">Source URL</label>
+          <div class="inline"><input id="capture-url" name="url" type="url" required placeholder="https://example.com"><button class="primary" type="submit">Save</button></div>
+          <p class="hint">Saved immediately; no metadata or network request.</p>
+        </form>
+        <div id="drop-zone" class="panel drop-zone" tabindex="0" role="button" aria-describedby="drop-help">
+          <h2>Add image or video</h2>
+          <p id="drop-help">Drop, paste, or choose files. Nothing is uploaded.</p>
+          <button id="choose-files" type="button">Choose files</button>
+          <input id="file-input" class="sr-only" type="file" accept="image/*,video/*" multiple>
+        </div>
+      </div>
+      <div class="toolbar"><label for="library-search">Filter references</label><input id="library-search" type="search" placeholder="Title, creator, URL, notes"></div>
+      <div id="reference-list" class="card-grid" aria-live="polite"></div>
+    </section>
+
+    <section id="board" class="view" aria-labelledby="board-title" hidden>
+      <div class="section-head"><div><p class="eyebrow">Compose direction</p><h1 id="board-title">Board</h1></div><div class="actions"><button id="export-json" type="button">Download JSON</button><button id="export-markdown" type="button">Download Markdown</button></div></div>
+      <div class="toolbar"><label for="aspect-filter">Aspect</label><select id="aspect-filter"><option value="">All aspects</option></select></div>
+      <ol id="board-list" class="board-list"></ol>
+    </section>
+
+    <section id="activity" class="view" aria-labelledby="activity-title" hidden>
+      <div class="section-head"><div><p class="eyebrow">Observed facts only</p><h1 id="activity-title">Activity</h1></div></div>
+      <ol id="activity-list" class="timeline"></ol>
+    </section>
+
+    <section id="data" class="view" aria-labelledby="data-title" hidden>
+      <div class="section-head"><div><p class="eyebrow">Your local data</p><h1 id="data-title">Backup and reset</h1></div></div>
+      <div class="panel data-actions"><button id="backup" type="button">Download workspace backup</button><label class="button" for="restore-file">Import workspace backup</label><input id="restore-file" class="sr-only" type="file" accept="application/json"><button id="delete-project" class="danger" type="button">Delete current project</button><button id="reset" class="danger" type="button">Reset all local data</button></div>
+      <p class="hint">Backups contain workspace records and locally captured binary files.</p>
+    </section>
+  </main>
+
+  <dialog id="editor-dialog" aria-labelledby="dialog-title">
+    <form id="editor-form" method="dialog"><div class="dialog-head"><h2 id="dialog-title"></h2><button value="cancel" aria-label="Close">×</button></div><div id="editor-fields"></div><div class="dialog-actions"><button value="cancel">Cancel</button><button id="editor-save" class="primary" value="default">Save</button></div></form>
+  </dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title"><form method="dialog"><h2 id="confirm-title">Confirm action</h2><p id="confirm-message"></p><div class="dialog-actions"><button value="cancel">Cancel</button><button class="danger" value="confirm">Confirm</button></div></form></dialog>
+  <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>
