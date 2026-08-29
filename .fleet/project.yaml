@@ -1,0 +1,50 @@
+schema_version: 2
+commands:
+  test:
+    argv: ["node", "--test"]
+    cwd: "."
+  check:
+    argv: ["node", "scripts/check.mjs"]
+    cwd: "."
+rules: []
+paths:
+  writable: ["src/**", "test/**", "scripts/**", "docs/**", "public/**", "README.md", "server.mjs", "package.json", "LICENSE", ".gitignore"]
+  protected: [".git/**", ".fleet/**", ".env*", ".github/workflows/**"]
+  generated: ["coverage/**", "tmp/**", "data/**"]
+verification:
+  required: ["test", "check"]
+  evidence_freshness: "exact_diff"
+  review:
+    required: true
+    block_severities: ["critical", "high"]
+network:
+  mode: "disabled"
+  https_domains: []
+  ports: []
+install:
+  ecosystems: []
+  existing_lock: "deny"
+  new_dependency: "deny"
+  manifest_lock_mutation: "deny"
+  lifecycle_scripts: "deny"
+  new_registry_domain: "deny"
+  host_global: "deny"
+approvals:
+  process_shell: "required"
+  new_dependency: "deny"
+  manifest_lock_mutation: "deny"
+  lifecycle_scripts: "deny"
+  new_registry_domain: "deny"
+  promotion: "required"
+worker:
+  preferred: "codex_cli"
+  allowed: ["codex_cli"]
+  allowed_strategy_ids: ["codex-sol-high"]
+  adaptive_routing: false
+  local_backend: false
+budgets:
+  wall_seconds: 1800.0
+  worker_turns: 1
+  processes: 40
+  download_bytes: 0
+  artifact_bytes: 100000000
