@@ -25,6 +25,7 @@ const required = [
   'src/capture-url.js',
   'src/capture-proxy.js',
   'src/chrome-capture.js',
+  'src/capture-request.js',
   'src/website-capture-service.js',
   'test/capture-url.test.js',
   'test/capture-proxy.test.js',

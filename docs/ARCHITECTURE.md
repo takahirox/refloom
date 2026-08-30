@@ -31,6 +31,8 @@ The browser code is separated into these boundaries:
   lifecycle.
 - `website-capture-service.js`: progressive checkpoint persistence into the
   existing Asset, Target, and Moment model with bounded revision-race retries.
+- `capture-request.js`: the strict shared HTTP/MCP request whitelist and public
+  result projection; URL and process settings never cross these surfaces.
 
 ## Domain boundaries
 
@@ -91,6 +93,12 @@ Import takes the reverse path: parse the backup, verify its format and workspace
 relationships, verify required binary records, then replace local state in one
 revisioned commit. A stale writer receives a conflict and reloads authoritative
 state. The browser and stdio MCP process use this same shared boundary.
+
+Website capture is reference-first. The UI commits the Reference and URL Asset,
+then optionally posts its ID and bounded settings. HTTP and MCP call the same
+capture service, which reloads the stored source URL and commits each completed
+screenshot independently. Partial failure cannot roll back the URL or earlier
+states.
 
 ## Versioning
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createAsset, createProject, createReference, createWorkspace } from '../src/domain.js';
 import {
   BACKUP_FORMAT, blobIdFromLocator, decodeBackup, deserializeWorkspace,
-  encodeBackup, referencedBlobIds, serializeWorkspace
+  encodeBackup, referencedBlobIds, serializeWorkspace, WorkspaceRepository
 } from '../src/storage.js';
 
 function workspaceWithBlob() {
@@ -60,4 +60,17 @@ test('backup decoder omits orphaned binary records', () => {
     { id: 'orphan', type: 'image/png', data: 'AA==' }
   ]));
   assert.deepEqual(backup.binaries.map(item => item.id), ['binary-1']);
+});
+
+test('WorkspaceRepository sends a bounded website capture request', async () => {
+  const calls = [];
+  const repository = new WorkspaceRepository(async (path, options) => {
+    calls.push({ path, options });
+    return new Response(JSON.stringify({ status: 'complete', captured: [] }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+  });
+  const result = await repository.captureWebsite('reference-1', { width: 800 });
+  assert.equal(result.status, 'complete');
+  assert.equal(calls[0].path, '/api/captures');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { referenceId: 'reference-1', settings: { width: 800 } });
 });

@@ -17,12 +17,13 @@ capabilities.
   cascade deletion.
 - Keyboard-accessible responsive UI, safe text rendering, security headers,
   domain/storage tests, and HTTP contract tests.
+- Opt-in controlled-Chrome capture of bounded initial and deterministic scroll
+  screenshots, with progressive Asset/Target/Moment persistence and UI/MCP use.
 
-## Future: experience capture
+## Future: richer experience capture
 
-Possible richer website, motion, interaction-sequence, region, and frame capture;
-capture quality controls; and provenance-aware media processing. None is
-automatic in 0.1.
+Video, semantic transition detection, hover/click/drag sequences, assisted user
+recording, mobile device emulation, and provenance-aware media processing.
 
 ## Future: discovery and intelligence
 

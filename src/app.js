@@ -78,6 +78,20 @@ async function commit(next, additions = [], message = '') {
   if (message) announce(message);
 }
 
+async function captureWebsite(referenceId, settings, control) {
+  control.disabled = true;
+  try {
+    const result = await repository.captureWebsite(referenceId, settings);
+    workspace = await repository.load();
+    await render();
+    announce(result.status === 'complete' ? 'Website capture complete' : 'Website capture partially completed', result.status === 'partial');
+  } catch {
+    workspace = await repository.load();
+    await render();
+    announce('Website capture failed; the saved URL is still available', true);
+  } finally { if (control.isConnected) control.disabled = false; }
+}
+
 function signal(next, event, subject, facts = {}) {
   return recordSignal(next, { projectId, event, subject, facts });
 }
@@ -210,6 +224,10 @@ async function renderLibrary() {
     edit.addEventListener('click', () => referenceEditor(reference));
     const add = element('button', { type: 'button', text: 'Add assets' });
     add.addEventListener('click', () => { $('#file-input').dataset.referenceId = reference.id; $('#file-input').click(); });
+    const websiteCapture = reference.sourceUrl ? element('button', { type: 'button', text: assets.some(asset => asset.provenance?.captureStrategy) ? 'Recapture website' : 'Capture website' }) : null;
+    websiteCapture?.addEventListener('click', () => captureWebsite(reference.id, {
+      width: 1440, height: 900, checkpoints: 3, readinessMs: 1000, settleMs: 500, maxRedirects: 10
+    }, websiteCapture));
     const select = element('button', { type: 'button', className: 'primary', text: 'Select for board' });
     select.addEventListener('click', () => selectionEditor(reference));
     const remove = element('button', { type: 'button', className: 'danger', text: 'Delete' });
@@ -221,7 +239,7 @@ async function renderLibrary() {
       await mediaPreview(previewAsset), element('h2', { text: displayReference(reference) }),
       element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
       reference.notes ? element('p', { text: reference.notes }) : null,
-      element('div', { className: 'actions' }, [edit, add, select, remove])
+      element('div', { className: 'actions' }, [edit, add, websiteCapture, select, remove])
     ]);
     cards.push(card);
   }
@@ -302,7 +320,26 @@ function bindEvents() {
   window.addEventListener('hashchange', render);
   $('#new-project').addEventListener('click', () => projectEditor()); $('#welcome-create').addEventListener('click', () => projectEditor()); $('#edit-project').addEventListener('click', () => projectEditor(activeProject()));
   $('#project-select').addEventListener('change', event => { projectId = event.target.value; location.hash = 'library'; render(); });
-  $('#url-form').addEventListener('submit', async event => { event.preventDefault(); const url = new FormData(event.currentTarget).get('url'); let next = createReference(workspace, { projectId, sourceUrl: url, captureMethod: 'url' }); const reference = next.references.at(-1); next = createAsset(next, { referenceId: reference.id, kind: 'url', locator: url, provenance: { captureMethod: 'manual-url' } }); next = signal(next, 'capture', { type: 'reference', id: reference.id }, { method: 'url' }); event.currentTarget.reset(); await commit(next, [], 'URL captured'); });
+  $('#url-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const url = data.get('url');
+    let next = createReference(workspace, { projectId, sourceUrl: url, captureMethod: 'url' });
+    const reference = next.references.at(-1);
+    next = createAsset(next, { referenceId: reference.id, kind: 'url', locator: url, provenance: { captureMethod: 'manual-url' } });
+    next = signal(next, 'capture', { type: 'reference', id: reference.id }, { method: 'url' });
+    const optedIn = data.get('captureWebsite') === 'on';
+    const settings = Object.fromEntries(['width', 'height', 'checkpoints', 'readinessMs', 'settleMs'].map(key => [key, Number(data.get(key))]));
+    const submit = form.querySelector('[type="submit"]');
+    try {
+      await commit(next, [], 'URL captured');
+      form.reset();
+      $('#capture-settings').hidden = true;
+    } catch (error) { announce(error.message, true); return; }
+    if (optedIn) await captureWebsite(reference.id, { ...settings, maxRedirects: 10 }, submit);
+  });
+  $('#capture-website').addEventListener('change', event => { $('#capture-settings').hidden = !event.currentTarget.checked; });
   $('#choose-files').addEventListener('click', () => { delete $('#file-input').dataset.referenceId; $('#file-input').click(); });
   $('#file-input').addEventListener('change', async event => { try { await captureFiles(event.target.files, event.target.dataset.referenceId); } catch (error) { announce(error.message, true); } event.target.value = ''; delete event.target.dataset.referenceId; });
   const drop = $('#drop-zone');

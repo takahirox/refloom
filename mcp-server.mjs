@@ -8,6 +8,8 @@ import {
 } from './src/domain.js';
 import { FileWorkspaceStore, RevisionConflictError, StoreError } from './src/file-workspace-store.js';
 import { blobIdFromLocator } from './src/storage.js';
+import { normalizeCaptureRequest, publicCaptureResult } from './src/capture-request.js';
+import { captureReference as defaultCaptureReference } from './src/website-capture-service.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
 const MAX_LINE_BYTES = 32 * 1024 * 1024;
@@ -37,7 +39,22 @@ const tools = [
   { name: 'create_target', description: 'Add a precise target to a reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), assetId: string('Asset ID', 128), kind: { type: 'string', enum: ['reference', 'asset', 'region', 'frame', 'interaction'] }, detail: { type: 'object' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId', 'kind') },
   { name: 'create_moment', description: 'Add a moment to a target.', inputSchema: required(objectSchema({ targetId: string('Target ID', 128), label: string('Label'), start: { type: 'number', minimum: 0 }, end: { type: 'number', minimum: 0 }, state: { type: 'object' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'targetId') },
   { name: 'create_selection', description: 'Add a selection expressing aspect and intent.', inputSchema: required(objectSchema({ projectId: string('Project ID', 128), targetId: string('Target ID', 128), momentId: string('Moment ID', 128), aspect: string('Relevant aspect'), intent: string('Intended use'), expectedRevision: { type: 'integer', minimum: 0 } }), 'projectId', 'targetId', 'aspect', 'intent') },
-  { name: 'add_selection_to_board', description: 'Append an existing selection to an existing board.', inputSchema: required(objectSchema({ boardId: string('Board ID', 128), selectionId: string('Selection ID', 128), expectedRevision: { type: 'integer', minimum: 0 } }), 'boardId', 'selectionId') }
+  { name: 'add_selection_to_board', description: 'Append an existing selection to an existing board.', inputSchema: required(objectSchema({ boardId: string('Board ID', 128), selectionId: string('Selection ID', 128), expectedRevision: { type: 'integer', minimum: 0 } }), 'boardId', 'selectionId') },
+  {
+    name: 'request_website_capture',
+    description: 'Capture bounded screenshots from the authoritative sourceUrl of an existing reference.',
+    inputSchema: required(objectSchema({
+      referenceId: string('Reference ID', 128),
+      settings: objectSchema({
+        width: { type: 'integer', minimum: 320, maximum: 2560 },
+        height: { type: 'integer', minimum: 320, maximum: 1440 },
+        checkpoints: { type: 'integer', minimum: 1, maximum: 5 },
+        readinessMs: { type: 'integer', minimum: 0, maximum: 15000 },
+        settleMs: { type: 'integer', minimum: 0, maximum: 2000 },
+        maxRedirects: { type: 'integer', minimum: 0, maximum: 20 }
+      })
+    }), 'referenceId')
+  }
 ];
 const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'get_reference', 'search_selections', 'get_selection', 'get_creative_direction']);
 for (const tool of tools) tool.annotations = {
@@ -46,6 +63,11 @@ for (const tool of tools) tool.annotations = {
   destructiveHint: false,
   idempotentHint: readTools.has(tool.name),
   openWorldHint: false
+};
+const captureTool = tools.find(tool => tool.name === 'request_website_capture');
+captureTool.annotations = {
+  title: 'request website capture', readOnlyHint: false,
+  destructiveHint: false, idempotentHint: false, openWorldHint: true
 };
 const toolsByName = new Map(tools.map(tool => [tool.name, tool]));
 
@@ -138,6 +160,7 @@ function mediaResource(asset) {
 export function createMcpServer(options = {}) {
   const store = options.store ?? new FileWorkspaceStore({ directory: options.dataDirectory ?? process.env.REFLOOM_DATA_DIR ?? path.resolve('data') });
   const diagnostics = options.diagnostics ?? process.stderr;
+  const captureReference = options.captureReference ?? defaultCaptureReference;
 
   async function mutate(args, operation) {
     const current = await store.load();
@@ -152,6 +175,18 @@ export function createMcpServer(options = {}) {
   async function callTool(name, raw) {
     const args = record(raw ?? {}, 'arguments');
     validateArguments(name, args);
+    if (name === 'request_website_capture') {
+      const requestValue = normalizeCaptureRequest(args);
+      const capture = await captureReference(store, requestValue.referenceId, requestValue.settings);
+      if (capture.status === 'complete' || capture.status === 'partial') return publicCaptureResult(capture);
+      const codes = {
+        CAPTURE_BUSY: 'CAPTURE_BUSY', INVALID_REFERENCE: 'INVALID_ARGUMENT',
+        INVALID_SETTINGS: 'INVALID_ARGUMENT', CAPTURE_FAILED: 'CAPTURE_FAILED'
+      };
+      fail(codes[capture.error] || 'CAPTURE_FAILED', capture.error === 'CAPTURE_BUSY'
+        ? 'A capture is already running for this reference' : capture.error?.startsWith('INVALID_')
+          ? 'The capture request is invalid' : 'Website capture failed');
+    }
     const { revision, workspace } = await store.load();
     if (name === 'list_projects') {
       const found = paged(workspace.projects.map(({ id, title, brief, updatedAt }) => ({ id, title, brief, updatedAt })), args);

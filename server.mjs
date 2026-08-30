@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { FileWorkspaceStore, RevisionConflictError, StoreError } from './src/file-workspace-store.js';
+import { normalizeCaptureRequest, publicCaptureResult } from './src/capture-request.js';
+import { captureReference as defaultCaptureReference } from './src/website-capture-service.js';
 
 const MAX_BODY = 40 * 1024 * 1024;
 
@@ -31,15 +33,15 @@ function send(response, status, body, headers = {}) {
 
 function json(response, status, value) { send(response, status, JSON.stringify(value), { 'Content-Type': 'application/json; charset=utf-8' }); }
 
-async function body(request) {
+async function body(request, maximum = MAX_BODY) {
   if (!(request.headers['content-type'] || '').toLowerCase().startsWith('application/json')) throw new StoreError('JSON_REQUIRED', 'Mutation requests require application/json');
   const declared = Number(request.headers['content-length']);
-  if (Number.isFinite(declared) && declared > MAX_BODY) throw new StoreError('BODY_TOO_LARGE', 'Request body is too large');
+  if (Number.isFinite(declared) && declared > maximum) throw new StoreError('BODY_TOO_LARGE', 'Request body is too large');
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new StoreError('BODY_TOO_LARGE', 'Request body is too large');
+    if (size > maximum) throw new StoreError('BODY_TOO_LARGE', 'Request body is too large');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -55,7 +57,7 @@ function trustedRequest(request) {
   catch { return false; }
 }
 
-async function api(request, response, pathname, store) {
+async function api(request, response, pathname, store, captureReference) {
   if (pathname === '/api/workspace' && request.method === 'GET') return json(response, 200, await store.load());
   if (pathname === '/api/workspace' && request.method === 'PUT') {
     const value = await body(request);
@@ -66,11 +68,23 @@ async function api(request, response, pathname, store) {
     const value = await body(request);
     return json(response, 200, await store.importBackup(value.revision, JSON.stringify(value.backup)));
   }
+  if (pathname === '/api/captures' && request.method === 'POST') {
+    const requestValue = normalizeCaptureRequest(await body(request, 16 * 1024));
+    const result = await captureReference(store, requestValue.referenceId, requestValue.settings);
+    const value = publicCaptureResult(result);
+    if (result.status === 'complete') return json(response, 201, value);
+    if (result.status === 'partial') return json(response, 207, value);
+    if (result.error === 'CAPTURE_BUSY') return json(response, 409, { status: 'busy', code: 'CAPTURE_BUSY' });
+    if (result.error === 'INVALID_REFERENCE' || result.error === 'INVALID_SETTINGS') {
+      return json(response, 400, { status: 'invalid', code: result.error });
+    }
+    return json(response, 502, { status: 'failed', code: 'CAPTURE_FAILED' });
+  }
   if (pathname.startsWith('/api/media/') && request.method === 'GET') {
     const media = await store.mediaInfo(decodeURIComponent(pathname.slice('/api/media/'.length)));
     return send(response, 200, media.contents, { 'Content-Type': media.mediaType });
   }
-  const allow = pathname === '/api/workspace' || pathname === '/api/backup' ? 'GET, PUT' : 'GET';
+  const allow = pathname === '/api/captures' ? 'POST' : pathname === '/api/workspace' || pathname === '/api/backup' ? 'GET, PUT' : 'GET';
   if (pathname.startsWith('/api/')) return send(response, 405, 'Method not allowed', { Allow: allow });
   return false;
 }
@@ -104,6 +118,7 @@ async function openStream(filename) {
 export function createRefloomServer(options = {}) {
   const repositoryRoot = path.resolve(options.root ?? import.meta.dirname);
   const store = options.store ?? new FileWorkspaceStore({ directory: options.dataDirectory ?? path.join(repositoryRoot, 'data') });
+  const captureReference = options.captureReference ?? defaultCaptureReference;
   let initialized;
   return createServer(async (request, response) => {
     response.on('error', () => {});
@@ -118,11 +133,12 @@ export function createRefloomServer(options = {}) {
       try {
         initialized ??= store.initialize();
         await initialized;
-        await api(request, response, url.pathname, store);
+        await api(request, response, url.pathname, store, captureReference);
       } catch (error) {
-        const status = error instanceof RevisionConflictError ? 409 : error.code === 'BODY_TOO_LARGE' ? 413 : error.code === 'JSON_REQUIRED' ? 415 : error instanceof StoreError ? 400 : 500;
+        const status = error instanceof RevisionConflictError ? 409 : error.code === 'BODY_TOO_LARGE' ? 413 : error.code === 'JSON_REQUIRED' ? 415 : error instanceof StoreError || error instanceof TypeError ? 400 : 500;
         const headers = error.code === 'BODY_TOO_LARGE' ? { Connection: 'close' } : {};
-        send(response, status, JSON.stringify({ error: error.message, code: error.code || 'INTERNAL_ERROR' }), { 'Content-Type': 'application/json; charset=utf-8', ...headers });
+        const safe = status < 500 ? error.message : 'The local operation failed';
+        send(response, status, JSON.stringify({ error: safe, code: error.code || (status < 500 ? 'INVALID_REQUEST' : 'INTERNAL_ERROR') }), { 'Content-Type': 'application/json; charset=utf-8', ...headers });
       }
       return;
     }

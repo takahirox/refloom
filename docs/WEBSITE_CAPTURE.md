@@ -1,8 +1,7 @@
 # Website capture
 
 The controlled-browser foundation and progressive persistence service are
-implemented. The service is the single integration boundary intended for the
-UI, HTTP API, and MCP surface.
+implemented. The UI, localhost HTTP API, and MCP tool call that same service.
 
 ## Security invariants
 
@@ -71,6 +70,11 @@ render elsewhere. Public destinations can themselves proxy traffic or return
 sensitive content available to the operator. IP classification and known Chrome
 paths require maintenance as platforms evolve.
 
-Video, animation recording, scripted interaction, and assisted-motion capture
-are deliberately deferred. UI, HTTP, and MCP authorization and user-visible
-limits are reviewed separately before those public surfaces call the service.
+The UI never fetches a saved URL unless the user opts in or presses Capture.
+The HTTP and MCP surfaces accept only an existing Reference ID and the bounded
+viewport/checkpoint/readiness settings; they cannot supply a URL, executable,
+proxy, filesystem path, or dependency override. The Reference source URL is
+always reloaded as authoritative input.
+
+Video, animation recording, scripted interaction, semantic state detection,
+and assisted-motion capture are deliberately deferred.

@@ -66,13 +66,17 @@ requires every referenced blob. Imported data is still untrusted and must keep
 using text-only rendering. Import replaces current data only after an explicit
 confirmation.
 
-## Website capture foundation
+## Website capture
 
-The currently unintegrated capture modules treat pages and DNS as hostile,
-reject non-public destinations, pin validated proxy connections, and run Chrome
-with fresh temporary state and bounded resources. These controls reduce SSRF,
-DNS-rebinding, state-leakage, and resource-exhaustion risk; they are not a claim
-of perfect browser sandboxing. The complete boundary is in `WEBSITE_CAPTURE.md`.
+Website capture is opt-in and is an open-world network action. The UI and MCP
+can request it only for an existing Reference; neither surface can override its
+stored URL, browser executable, proxy, or process dependencies. Capture modules
+treat pages and DNS as hostile, reject non-public destinations, pin every
+validated proxy connection, and run Chrome with fresh temporary state and
+bounded resources. Redirects and subresources traverse the same proxy boundary.
+These controls reduce SSRF, DNS-rebinding, session-leakage, and
+resource-exhaustion risk; they are not a claim of perfect browser sandboxing.
+The complete boundary is in `WEBSITE_CAPTURE.md`.
 
 ## Local data and provenance
 

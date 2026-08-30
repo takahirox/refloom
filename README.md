@@ -9,6 +9,7 @@ used, the relevant aspect, and the creator's intent.
 
 - Node.js 22 or newer
 - A current browser
+- Chrome or Chromium for optional automatic website capture
 
 No package installation, account, hosted backend, or AI provider is required.
 
@@ -66,6 +67,9 @@ selections, or board membership, or enrich descriptive reference fields. There
 are no delete, remove, reset, import, reorder, or arbitrary workspace-write
 tools. Supply `expectedRevision` when coordinating multiple agents; stale
 mutations return `REVISION_CONFLICT` instead of overwriting newer state.
+The `request_website_capture` tool is an explicitly open-world, non-destructive
+action: it accepts an existing Reference ID and bounded capture settings, then
+uses only that Reference's stored source URL.
 
 Captured binary media is exposed as `refloom://media/<opaque-id>` MCP resources.
 Only media currently referenced by a registered workspace asset can be read;
@@ -78,13 +82,15 @@ rendering constraints.
 
 1. Create a project and optional brief.
 2. Capture an image by picker, drop, or clipboard, or save a URL immediately.
-3. Enrich the reference later with provenance, notes, and more image or video
+3. Optionally enrich a saved URL with bounded initial/scroll screenshots. The
+   URL remains saved if Chrome is unavailable or a later checkpoint fails.
+4. Enrich the reference later with provenance, notes, and more image or video
    assets.
-4. Select an exact reference target or moment, name the relevant aspect, and
+5. Select an exact reference target or moment, name the relevant aspect, and
    state the intended use.
-5. Compose and arrange selections on the project board; filter by aspect.
-6. Download the board as Markdown or `refloom.creative-direction` JSON.
-7. Review factual capture, enrichment, selection, board, and export activity.
+6. Compose and arrange selections on the project board; filter by aspect.
+7. Download the board as Markdown or `refloom.creative-direction` JSON.
+8. Review factual capture, enrichment, selection, board, and export activity.
 
 Project and reference deletion and the full reset action require confirmation.
 
@@ -117,15 +123,18 @@ method needed to reproduce them.
 
 ## 0.1 scope
 
-Included: local project/reference capture and enrichment, precise selections,
-boards, factual activity signals, Markdown/JSON direction export, validated
-backup/import, cascade deletion, and local reset.
+Included: local project/reference capture and enrichment, controlled automatic
+website screenshot checkpoints, precise selections, boards, factual activity
+signals, Markdown/JSON direction export, validated backup/import, cascade
+deletion, and local reset.
 
-Not included: automated site or experience capture, search or recommendations,
-persistent personal/team contexts, collaboration, hosted sync, AI providers, or
-legal/copyright policy automation. See [docs/ROADMAP.md](docs/ROADMAP.md).
+Not included: video/hover/click/drag capture, semantic transition detection,
+search or recommendations, persistent personal/team contexts, collaboration,
+hosted sync, AI providers, or legal/copyright policy automation. See
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 Technical boundaries and formats are documented in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/EXPORT_SCHEMA.md](docs/EXPORT_SCHEMA.md), and
-[docs/PRIVACY_SECURITY.md](docs/PRIVACY_SECURITY.md).
+[docs/PRIVACY_SECURITY.md](docs/PRIVACY_SECURITY.md). Website-capture controls
+and limits are in [docs/WEBSITE_CAPTURE.md](docs/WEBSITE_CAPTURE.md).

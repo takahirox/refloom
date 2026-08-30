@@ -44,7 +44,17 @@
           <h2>Save a URL</h2>
           <label for="capture-url">Source URL</label>
           <div class="inline"><input id="capture-url" name="url" type="url" required placeholder="https://example.com"><button class="primary" type="submit">Save</button></div>
-          <p class="hint">Saved immediately; no metadata or network request.</p>
+          <p class="hint">The URL is saved first. No network request is made unless website capture is selected.</p>
+          <label class="check-option"><input id="capture-website" name="captureWebsite" type="checkbox" aria-controls="capture-settings"> Capture website after saving</label>
+          <fieldset id="capture-settings" class="capture-settings" hidden>
+            <legend>Website capture settings</legend>
+            <label>Viewport width <input name="width" type="number" min="320" max="2560" value="1440" required></label>
+            <label>Viewport height <input name="height" type="number" min="320" max="1440" value="900" required></label>
+            <label>Checkpoints <input name="checkpoints" type="number" min="1" max="5" value="3" required></label>
+            <label>Page readiness (ms) <input name="readinessMs" type="number" min="0" max="15000" value="1000" required></label>
+            <label>Checkpoint settle (ms) <input name="settleMs" type="number" min="0" max="2000" value="500" required></label>
+            <p class="hint">Capture makes a bounded request to the saved URL and stores still screenshots only. It does not record video or interact with the page.</p>
+          </fieldset>
         </form>
         <div id="drop-zone" class="panel drop-zone" tabindex="0" role="button" aria-describedby="drop-help">
           <h2>Add image or video</h2>

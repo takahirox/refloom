@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import test from 'node:test';
 import { createBoard, createProject, createReference, createTarget, createWorkspace } from '../src/domain.js';
 import { FileWorkspaceStore } from '../src/file-workspace-store.js';
+import { createMcpServer } from '../mcp-server.mjs';
 
 async function fixture() {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'refloom-mcp-'));
@@ -67,6 +68,11 @@ test('stdio discovery, progressive reads, additive writes, media, errors, and re
   assert.ok(!names.some(name => /delete|remove|reset|replace/.test(name)));
   assert.equal(discovered.result.tools.find(tool => tool.name === 'list_projects').annotations.readOnlyHint, true);
   assert.equal(discovered.result.tools.find(tool => tool.name === 'create_reference').annotations.destructiveHint, false);
+  const captureTool = discovered.result.tools.find(tool => tool.name === 'request_website_capture');
+  assert.equal(captureTool.annotations.readOnlyHint, false);
+  assert.equal(captureTool.annotations.destructiveHint, false);
+  assert.equal(captureTool.annotations.openWorldHint, true);
+  assert.deepEqual(Object.keys(captureTool.inputSchema.properties), ['referenceId', 'settings']);
 
   const projects = await mcp.request('tools/call', { name: 'list_projects', arguments: {} });
   assert.deepEqual(projects.result.structuredContent.projects.map(item => item.id), ['project_one']);
@@ -125,6 +131,26 @@ test('stdio discovery, progressive reads, additive writes, media, errors, and re
 
   const invalidArguments = await mcp.request('tools/call', { name: 'list_projects', arguments: { unexpected: true } });
   assert.equal(invalidArguments.result.structuredContent.error.code, 'INVALID_ARGUMENT');
+});
+
+test('injected MCP capture returns structured results and bounded tool errors', async () => {
+  const store = { initialize: async () => {}, load: async () => ({ revision: 0, workspace: createWorkspace() }) };
+  let next = { status: 'partial', captured: [{ assetId: 'a', targetId: 't', momentId: 'm', mediaId: 'hidden' }] };
+  const calls = [];
+  const mcp = createMcpServer({ store, diagnostics: { write() {} }, captureReference: async (...args) => { calls.push(args); return next; } });
+  const partial = await mcp.handle({ method: 'tools/call', params: { name: 'request_website_capture', arguments: { referenceId: 'r', settings: { width: 800 } } } });
+  assert.deepEqual(partial.structuredContent, { status: 'partial', captured: [{ assetId: 'a', targetId: 't', momentId: 'm' }] });
+  assert.equal(calls[0][1], 'r');
+  assert.equal(calls[0][2].width, 800);
+
+  next = { status: 'failed', captured: [], error: 'CAPTURE_BUSY' };
+  const busy = await mcp.handle({ method: 'tools/call', params: { name: 'request_website_capture', arguments: { referenceId: 'r' } } });
+  assert.equal(busy.isError, true);
+  assert.equal(busy.structuredContent.error.code, 'CAPTURE_BUSY');
+
+  const invalid = await mcp.handle({ method: 'tools/call', params: { name: 'request_website_capture', arguments: { referenceId: 'r', settings: { chromePath: '/tmp/chrome' } } } });
+  assert.equal(invalid.isError, true);
+  assert.equal(invalid.structuredContent.error.code, 'INVALID_ARGUMENT');
 });
 
 test('two stdio servers cannot silently overwrite the same revision', async t => {

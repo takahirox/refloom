@@ -124,6 +124,43 @@ test('API rejects declared oversized bodies without reading them', async () => {
   assert.equal(response.status, 413);
 });
 
+test('capture API passes only a bounded reference request to the injected service', async t => {
+  const calls = [];
+  const injected = createRefloomServer({ dataDirectory, captureReference: async (...args) => {
+    calls.push(args);
+    return { status: 'complete', captured: [{ assetId: 'asset-1', targetId: 'target-1', momentId: 'moment-1', mediaId: 'private' }], summary: { private: true } };
+  } });
+  injected.listen(0, '127.0.0.1');
+  await new Promise(resolve => injected.once('listening', resolve));
+  t.after(() => injected.close());
+  const captureOrigin = `http://127.0.0.1:${injected.address().port}`;
+  const response = await fetch(`${captureOrigin}/api/captures`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ referenceId: 'reference-1', settings: { width: 800, height: 600, checkpoints: 2 } })
+  });
+  assert.equal(response.status, 201);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0][2], { width: 800, height: 600, checkpoints: 2, readinessMs: 1000, settleMs: 500, maxRedirects: 10 });
+  assert.deepEqual(await response.json(), { status: 'complete', captured: [{ assetId: 'asset-1', targetId: 'target-1', momentId: 'moment-1' }] });
+});
+
+test('capture API rejects executable, proxy, dependency, URL, and unknown settings', async () => {
+  for (const value of [
+    { referenceId: 'r', chromePath: '/tmp/chrome', settings: {} },
+    { referenceId: 'r', url: 'https://example.com', settings: {} },
+    { referenceId: 'r', settings: { proxy: 'http://localhost:9' } },
+    { referenceId: 'r', settings: { dependencies: {} } },
+    { referenceId: 'r', settings: { width: 319 } }
+  ]) {
+    const response = await call('/api/captures', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+    assert.equal(response.status, 400);
+  }
+  const oversized = await call('/api/captures', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': String(17 * 1024) }
+  });
+  assert.equal(oversized.status, 413);
+});
+
 test('unsupported methods return 405 and advertise supported methods', async () => {
   const response = await get('/', 'POST');
   assert.equal(response.status, 405);

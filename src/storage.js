@@ -106,6 +106,14 @@ export class WorkspaceRepository {
     return importWorkspace(value.workspace);
   }
 
+  async captureWebsite(referenceId, settings = {}) {
+    const response = await this.#request('/api/captures', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ referenceId, settings })
+    });
+    return response.json();
+  }
+
   async mutate(workspace, additions = []) {
     validateWorkspace(workspace);
     const binaries = [];
