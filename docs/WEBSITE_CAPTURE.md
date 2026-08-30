@@ -2,6 +2,9 @@
 
 The controlled-browser foundation and progressive persistence service are
 implemented. The UI, localhost HTTP API, and MCP tool call that same service.
+This is a bounded adapter around the local-first, non-AI core described in
+`PRODUCT_SPEC.md`; it does not make autonomous or unrestricted capture a
+product principle.
 
 ## Security invariants
 
@@ -47,8 +50,9 @@ and connections are capped.
 
 ## Progressive persistence
 
-`captureReference` validates an existing URL Reference before launching the
-driver. Each completed screenshot is passed through an awaited callback and
+`captureReference` validates an existing, currently project-owned version-1 URL
+Reference before launching the driver. Each completed screenshot is passed
+through an awaited callback and
 committed immediately as a blob-backed image Asset, an asset Target, and a
 Moment. Every record retains original/final URL, title/domain, capture time,
 viewport, capture method, strategy, and exact checkpoint position. A later

@@ -7,6 +7,7 @@ const required = [
   'package.json',
   'README.md',
   'LICENSE',
+  'docs/PRODUCT_SPEC.md',
   'docs/ARCHITECTURE.md',
   'docs/EXPORT_SCHEMA.md',
   'docs/PRIVACY_SECURITY.md',

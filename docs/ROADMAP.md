@@ -2,7 +2,10 @@
 
 This document distinguishes the completed 0.1 core from possible future work.
 Items below the first section are directions, not promises or implemented
-capabilities.
+capabilities. It sequences hypotheses under the durable principles in
+`PRODUCT_SPEC.md`; it is not the authoritative product specification. Issues
+are finite implementation or research work, so closing Issues #1, #2, #3, or
+#4 does not mean the product vision is complete.
 
 ## Completed core slice: 0.1
 
@@ -13,8 +16,8 @@ capabilities.
 - Project boards with ordering, aspect filtering/grouping, and removal.
 - Human-readable Markdown and versioned creative-direction JSON export.
 - Factual activity signals without stored preference inference.
-- IndexedDB persistence, binary lifecycle, validated full backup/import, and
-  cascade deletion.
+- Revisioned local file persistence and media lifecycle, read-only migration
+  from legacy IndexedDB, validated full backup/import, and cascade deletion.
 - Keyboard-accessible responsive UI, safe text rendering, security headers,
   domain/storage tests, and HTTP contract tests.
 - Opt-in controlled-Chrome capture of bounded initial and deterministic scroll
@@ -34,8 +37,11 @@ from observed facts and must not replace the core workflow.
 ## Future: persistent contexts
 
 Personal and team history, reusable constraints, cross-project memory, and
-context precedence controls. Project intent should continue to outrank durable
-context.
+context precedence controls. Workspace-level reusable References are part of
+this direction; project intent should continue to outrank durable context.
+Removing the version-1 `projectId` ownership model is gated by the major-version,
+deterministic migration, relationship, media, rollback/export, mixed-version
+rejection, and test requirements in `PRODUCT_SPEC.md`.
 
 ## Future: collaboration and hosted sync
 

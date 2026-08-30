@@ -35,6 +35,9 @@ defense in depth, not a substitute for safe rendering.
 
 ## MCP boundary
 
+MCP is a separately versioned live operational contract, not a backup or a
+complete portable expression of the workspace.
+
 The MCP server is a local child process with the operating-system permissions of
 the user who launches Codex. Configure an explicit absolute data directory and
 review project-local Codex configuration before trusting it. Refloom never
@@ -50,8 +53,10 @@ Media reads accept only `refloom://media/<opaque-id>` resources derived from
 registered blob-backed assets. The store verifies current authoritative
 references again before reading bytes. MIME metadata and provenance accompany
 the resource. Tools accept no filesystem paths, and URL assets are registered
-without server-side network fetching. Protocol responses are the only stdout
-output; startup and malformed-input diagnostics go to stderr.
+without server-side network fetching. The bounded tools do not provide an
+atomic, complete snapshot with all media or a workspace-replacement operation;
+use `refloom.workspace-backup` for restore portability. Protocol responses are
+the only stdout output; startup and malformed-input diagnostics go to stderr.
 
 ## Safe rendering and imports
 
@@ -80,12 +85,13 @@ The complete boundary is in `WEBSITE_CAPTURE.md`.
 
 ## Local data and provenance
 
-Workspace JSON and media are stored unencrypted below the configured local data
-directory and are exchanged only with the same-origin localhost companion.
-Filesystem permissions, backups, and anyone with account access may read or
-remove them. The default `data/` directory is Git-ignored but users must still
-avoid committing or synchronizing it. IndexedDB is retained only as a legacy
-migration/recovery copy and is never deleted automatically.
+The authoritative workspace JSON and media are stored unencrypted below the
+configured local data directory and are exchanged only with the same-origin
+localhost companion. Filesystem permissions, backups, and anyone with account
+access may read or remove them. The default `data/` directory is Git-ignored but
+users must still avoid committing or synchronizing it. IndexedDB is retained
+only as a read-only legacy migration/recovery copy and is never deleted
+automatically.
 
 Source URLs, creator fields, capture times, capture methods, and asset provenance
 are retained when provided. Provenance records user-supplied facts; it does not

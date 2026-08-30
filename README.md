@@ -5,6 +5,9 @@ interactive references into project-specific creative direction. It preserves
 the distinction between a source reference, the exact target or moment being
 used, the relevant aspect, and the creator's intent.
 
+The authoritative long-term product model and its distinction from current 0.1
+behavior are in [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md).
+
 ## Prerequisites
 
 - Node.js 22 or newer
@@ -133,7 +136,10 @@ search or recommendations, persistent personal/team contexts, collaboration,
 hosted sync, AI providers, or legal/copyright policy automation. See
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
-Technical boundaries and formats are documented in
+The living product specification, current slice, technical boundaries, and
+portable formats are documented in
+[docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md),
+[docs/PRODUCT_SLICE.md](docs/PRODUCT_SLICE.md),
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/EXPORT_SCHEMA.md](docs/EXPORT_SCHEMA.md), and
 [docs/PRIVACY_SECURITY.md](docs/PRIVACY_SECURITY.md). Website-capture controls

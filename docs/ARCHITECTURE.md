@@ -36,11 +36,18 @@ The browser code is separated into these boundaries:
 
 ## Domain boundaries
 
-A project owns references, targets, moments, selections, boards, and signals.
-A reference owns assets and targets. A selection joins a project-owned target,
-an optional moment belonging to that target, an aspect, and an intent. A board
-contains only selections from its project. Domain validation rejects dangling
-or cross-project relationships and duplicate board entries.
+In the current version-1 domain, a project owns references, targets, moments,
+selections, boards, and signals. A reference owns assets and targets. A
+selection joins a project-owned target, an optional moment belonging to that
+target, an aspect, and an intent. A board contains only selections from its
+project. Domain validation rejects dangling or cross-project relationships and
+duplicate board entries.
+
+That Reference ownership is a deliberate 0.1 simplification, not the durable
+product model. References are intended to become workspace-level reusable
+sources while Targets and Moments remain source-linked and Selections, Boards,
+Signals, and Decisions remain context-specific. `PRODUCT_SPEC.md` defines the
+migration gates; version 1 is unchanged until all are met.
 
 Signals record supported observable events and facts. They are not a store for
 inferred taste or preference claims. Reference and project deletion cascade
@@ -64,7 +71,7 @@ boundary. It intentionally has no CORS policy and is not a public listener.
 IndexedDB remains read-only migration input. `localStorage` contains only the
 current project ID.
 Object URLs used for previews are temporary presentation resources, not durable
-storage. There is no server-side persistence.
+storage; the local Node file store is authoritative persistence.
 
 The MCP process opens the same configured `FileWorkspaceStore`. Every mutation
 loads an authoritative revision, applies one domain operation, and commits with
@@ -102,7 +109,11 @@ states.
 
 ## Versioning
 
-Workspace, backup, and creative-direction versions are independent. Readers
-must reject unsupported versions rather than silently guessing. A future
-migration must be explicit, deterministic, tested, and preserve provenance.
-See `EXPORT_SCHEMA.md` for the public interchange contracts.
+The persistence envelope, `refloom.workspace-backup`,
+`refloom.creative-direction`, and live MCP tool/resource surface are separate,
+independently versioned contracts. Readers must reject unsupported incompatible
+versions rather than silently guessing. MCP is an operational interface with
+bounded reads and mutations, not an atomic restorable backup. A future domain
+migration must be explicit, deterministic, tested, and preserve provenance,
+IDs, relationships, and media. See `PRODUCT_SPEC.md` for the product and
+migration decisions and `EXPORT_SCHEMA.md` for portable interchange contracts.

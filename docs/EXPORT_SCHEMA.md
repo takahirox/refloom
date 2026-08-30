@@ -1,8 +1,14 @@
 # Export schemas
 
-Refloom 0.1 emits two JSON formats. Consumers must check both `format` and
+Refloom 0.1 emits two portable JSON formats. Consumers must check both `format` and
 `version` before reading the rest of a document. Timestamps are ISO 8601 strings;
 identifiers are opaque strings and must not be parsed for meaning.
+
+These formats are independent of both the revisioned on-disk persistence
+envelope and the live MCP protocol/tool/resource contract. Their versions may
+advance separately. MCP is not a backup: its bounded operational reads do not
+constitute an atomic, complete, restorable workspace and its mutation surface
+does not expose backup replacement.
 
 ## `refloom.creative-direction` version 1
 
@@ -144,3 +150,8 @@ backups include only binaries referenced by workspace assets.
   as permission to accept an unknown version.
 - Importing a valid backup replaces the current local workspace. Direction JSON
   cannot be imported as a backup.
+- Version 1 accurately retains project-owned References. A future move to
+  workspace-level reusable References requires a new workspace/domain major
+  version and the deterministic backup migration, stable-ID/media preservation,
+  reuse semantics, relationship validation, rollback/export, mixed-version
+  rejection, and tests specified in `PRODUCT_SPEC.md`.

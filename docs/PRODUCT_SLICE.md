@@ -1,5 +1,9 @@
 # Refloom 0.1 product slice
 
+This document records the implemented 0.1 slice. The durable product model,
+including workspace-level reusable References as the long-term direction, is in
+`PRODUCT_SPEC.md`.
+
 ## Objective
 
 Deliver the smallest coherent product in which a creative project can capture a
@@ -31,9 +35,12 @@ no third-party packages.
 ## Conceptual model
 
 - Project: immediate creative task and strongest context.
-- Reference: source creative work being referenced.
+- Reference: source creative work being referenced. In the version-1 domain it
+  is deliberately project-owned; this is a 0.1 compatibility simplification,
+  not the long-term ownership model.
 - Asset: captured material such as image, video, or URL.
-- Target: whole reference, asset, region/frame, moment, or interaction sequence.
+- Target: source-linked whole reference, asset, region/frame, moment, or
+  interaction sequence.
 - Moment: optional time/state-specific target.
 - Selection: project-specific use of a target, aspect, and intent.
 - Board: project-scoped composition of selections.
@@ -53,8 +60,9 @@ no third-party packages.
 - A deterministic repository check rejects syntax errors and missing required
   deliverables.
 - Architecture, security/privacy, limitations, and follow-up roadmap are
-  documented. Future rich automatic site capture, search/recommendation,
-  collaboration, and AI providers are explicitly outside this local-first slice.
+  documented. Bounded automatic screenshot capture is implemented; richer
+  experience capture, search/recommendation, collaboration, and AI providers
+  are explicitly outside this local-first slice.
 
 ## Product constraints inherited from Issue #1
 
@@ -67,4 +75,3 @@ no third-party packages.
 - Project intent outranks persistent context and personal/team history.
 - Intelligence features surround the core workflow and must not be conflated
   with it.
-
