@@ -33,6 +33,7 @@ test('drives bounded deterministic checkpoints and always cleans up', async () =
   const removed = [];
   let proxyClosed = false;
   let processKilled = false;
+  const callbacks = [];
   const process = new EventEmitter();
   process.kill = () => { processKilled = true; };
   const cdp = {
@@ -63,9 +64,23 @@ test('drives bounded deterministic checkpoints and always cleans up', async () =
     settleMs: 0,
     readinessMs: 0,
     checkpoints: 3,
+    onScreenshot: async screenshot => callbacks.push(screenshot),
     now: () => '2026-08-30T00:00:00.000Z'
   });
   assert.deepEqual(result.screenshots.map(value => value.y), [0, 900, 1800]);
+  assert.deepEqual(callbacks.map(value => value.checkpoint), [
+    { index: 0, y: 0, count: 3 },
+    { index: 1, y: 900, count: 3 },
+    { index: 2, y: 1800, count: 3 }
+  ]);
+  assert.deepEqual(callbacks[0].viewport, { width: 1440, height: 900, deviceScaleFactor: 1 });
+  assert.equal(callbacks[0].originalUrl, 'https://example.com/');
+  assert.equal(callbacks[0].finalUrl, 'https://example.com/');
+  assert.equal(callbacks[0].title, 'Example');
+  assert.equal(callbacks[0].domain, 'example.com');
+  assert.equal(callbacks[0].capturedAt, '2026-08-30T00:00:00.000Z');
+  assert.equal(callbacks[0].captureMethod, 'automated-browser');
+  assert.equal(callbacks[0].captureStrategy, 'deterministic-scroll');
   assert.equal(calls.some(([method]) => method === 'Browser.setDownloadBehavior'), true);
   assert.equal(calls.some(([method]) => method === 'Network.setBypassServiceWorker'), true);
   const args = calls.find(([method]) => method === 'spawn')[1];

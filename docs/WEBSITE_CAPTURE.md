@@ -1,7 +1,8 @@
-# Website capture foundation
+# Website capture
 
-This foundation is internal infrastructure only. It is not connected to the UI,
-HTTP API, MCP surface, or domain persistence.
+The controlled-browser foundation and progressive persistence service are
+implemented. The service is the single integration boundary intended for the
+UI, HTTP API, and MCP surface.
 
 ## Security invariants
 
@@ -45,6 +46,22 @@ bounded settle delay. Navigation readiness, each checkpoint, settling, and the
 whole operation have finite deadlines; viewport, page-height metadata, bytes,
 and connections are capped.
 
+## Progressive persistence
+
+`captureReference` validates an existing URL Reference before launching the
+driver. Each completed screenshot is passed through an awaited callback and
+committed immediately as a blob-backed image Asset, an asset Target, and a
+Moment. Every record retains original/final URL, title/domain, capture time,
+viewport, capture method, strategy, and exact checkpoint position. A later
+navigation, renderer, media-limit, or revision failure therefore leaves the
+Reference and all previously committed states intact.
+
+Each checkpoint commit reloads authoritative state and retries only bounded
+revision races. It never replaces or deletes concurrent UI/MCP work. Concurrent
+captures of the same Reference in one process are rejected, while unrelated
+References remain independent. Results are explicitly `complete`, `partial`, or
+`failed` and expose stable error codes rather than local paths.
+
 ## Limits
 
 This is defense in depth, not perfect browser or operating-system sandboxing.
@@ -55,5 +72,5 @@ sensitive content available to the operator. IP classification and known Chrome
 paths require maintenance as platforms evolve.
 
 Video, animation recording, scripted interaction, and assisted-motion capture
-are deliberately deferred. Any future public integration needs separate review
-of authorization, persistence, provenance, retention, and user-visible limits.
+are deliberately deferred. UI, HTTP, and MCP authorization and user-visible
+limits are reviewed separately before those public surfaces call the service.

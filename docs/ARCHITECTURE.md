@@ -26,10 +26,11 @@ The browser code is separated into these boundaries:
 - `mcp-server.mjs`: dependency-free newline-delimited JSON-RPC stdio transport,
   progressive read tools, additive mutation tools, structured errors, and
   registered-media MCP resources.
-- `capture-url.js`, `capture-proxy.js`, and `chrome-capture.js`: an unintegrated,
-  dependency-free website-capture foundation with public-address validation,
-  pinned proxy connections, and controlled Chrome orchestration. See
-  `WEBSITE_CAPTURE.md`; no product or persistence surface calls it yet.
+- `capture-url.js`, `capture-proxy.js`, and `chrome-capture.js`: dependency-free
+  public-address validation, DNS-pinned proxying, and controlled Chrome/CDP
+  lifecycle.
+- `website-capture-service.js`: progressive checkpoint persistence into the
+  existing Asset, Target, and Moment model with bounded revision-race retries.
 
 ## Domain boundaries
 

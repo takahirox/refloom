@@ -128,6 +128,26 @@ export async function connectChromeCdp(_browser, options = {}) {
   };
 }
 
+export function validateCaptureSettings(options = {}) {
+  const values = {
+    settleMs: options.settleMs ?? 500,
+    readinessMs: options.readinessMs ?? 1_000,
+    checkpoints: options.checkpoints ?? 3,
+    width: options.width ?? 1440,
+    height: options.height ?? 900,
+    maxRedirects: options.maxRedirects ?? 10
+  };
+  if (!Object.values(values).every(Number.isSafeInteger) ||
+      values.settleMs < 0 || values.settleMs > 2_000 ||
+      values.readinessMs < 0 || values.readinessMs > 15_000 ||
+      values.checkpoints < 1 || values.checkpoints > 5 ||
+      values.maxRedirects < 0 || values.maxRedirects > 20 ||
+      values.width < 320 || values.width > 2_560 ||
+      values.height < 320 || values.height > 1_440) throw new Error(CAPTURE_ERROR);
+  if (options.onScreenshot !== undefined && typeof options.onScreenshot !== 'function') throw new Error(CAPTURE_ERROR);
+  return values;
+}
+
 export async function captureWebsite(input, options = {}) {
   const clock = options.clock || globalThis;
   const fs = options.fs || { mkdtemp, rm, access };
@@ -136,17 +156,8 @@ export async function captureWebsite(input, options = {}) {
   const connectCdp = options.connectCdp || connectChromeCdp;
   const overallMs = options.overallTimeoutMs ?? 45_000;
   const checkpointMs = options.checkpointTimeoutMs ?? 8_000;
-  const settleMs = options.settleMs ?? 500;
-  const readinessMs = options.readinessMs ?? 1_000;
-  const checkpoints = options.checkpoints ?? 3;
-  const width = options.width ?? 1440;
-  const height = options.height ?? 900;
+  const { settleMs, readinessMs, checkpoints, width, height, maxRedirects } = validateCaptureSettings(options);
   const maxScreenshotBytes = options.maxScreenshotBytes ?? 25 * 1024 * 1024;
-  const maxRedirects = options.maxRedirects ?? 10;
-  if (![settleMs, readinessMs, checkpoints, width, height, maxRedirects].every(Number.isSafeInteger) ||
-      settleMs < 0 || settleMs > 2_000 || readinessMs < 0 || readinessMs > 15_000 ||
-      checkpoints < 1 || checkpoints > 5 || maxRedirects < 0 || maxRedirects > 20 ||
-      width < 320 || width > 2_560 || height < 320 || height > 1_440) throw new Error(CAPTURE_ERROR);
   let profile;
   let proxy;
   let browser;
@@ -234,6 +245,7 @@ export async function captureWebsite(input, options = {}) {
     if (!metrics || typeof metrics.url !== 'string' || typeof metrics.title !== 'string' ||
         ![metrics.width, metrics.height, metrics.viewportWidth, metrics.viewportHeight].every(Number.isFinite)) throw new Error(CAPTURE_ERROR);
     const final = await normalizeCaptureUrl(metrics.url, { resolver: options.resolver });
+    const capturedAt = options.now?.() || new Date().toISOString();
     const screenshots = [];
     for (let index = 0; index < checkpoints; index += 1) {
       active();
@@ -242,9 +254,22 @@ export async function captureWebsite(input, options = {}) {
       await bounded(new Promise(resolve => clock.setTimeout(resolve, settleMs)), clock, checkpointMs);
       const shot = await bounded(cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true }), clock, checkpointMs);
       if (typeof shot.data !== 'string' || Buffer.byteLength(shot.data, 'base64') > maxScreenshotBytes || Buffer.from(shot.data, 'base64').toString('base64') !== shot.data) throw new Error(CAPTURE_ERROR);
-      screenshots.push({ y, png: shot.data });
+      const screenshot = { y, png: shot.data };
+      screenshots.push(screenshot);
+      await options.onScreenshot?.({
+        ...screenshot,
+        originalUrl: target.href,
+        finalUrl: final.href,
+        title: metrics.title,
+        domain: final.hostname,
+        viewport: { width, height, deviceScaleFactor: 1 },
+        checkpoint: { index, y, count: checkpoints },
+        capturedAt,
+        captureMethod: 'automated-browser',
+        captureStrategy: 'deterministic-scroll'
+      });
     }
-    return { ...metrics, originalUrl: target.href, finalUrl: final.href, hostname: final.hostname, viewport: { width, height, deviceScaleFactor: 1 }, screenshots, capturedAt: options.now?.() || new Date().toISOString(), networkBytes: proxy.stats?.().usedBytes };
+    return { ...metrics, originalUrl: target.href, finalUrl: final.href, hostname: final.hostname, viewport: { width, height, deviceScaleFactor: 1 }, screenshots, capturedAt, networkBytes: proxy.stats?.().usedBytes };
   })();
 
   try {
