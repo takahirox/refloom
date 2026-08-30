@@ -3,7 +3,7 @@ import {
   createTarget, deleteProject, deleteReference, exportBoardMarkdown, exportCreativeDirection,
   recordSignal, removeFromBoard, reorderBoard, updateProject, updateReference
 } from './domain.js';
-import { BLOB_PREFIX, WorkspaceRepository, blobIdFromLocator } from './storage.js';
+import { BLOB_PREFIX, RevisionConflictError, WorkspaceRepository, blobIdFromLocator, isEmptyWorkspace, readLegacyMigration } from './storage.js';
 import { displayReference, formatMoment, formatSignal, safeFilename } from './ui-format.js';
 
 const $ = selector => document.querySelector(selector);
@@ -24,7 +24,7 @@ function storeProject(value) {
     if (value) globalThis.localStorage?.setItem('refloom.project', value);
     else globalThis.localStorage?.removeItem('refloom.project');
   } catch {
-    // Project selection is a convenience only; IndexedDB remains authoritative.
+    // Project selection is a convenience only; the localhost file store is authoritative.
   }
 }
 
@@ -65,7 +65,14 @@ function announce(message, error = false) {
 }
 
 async function commit(next, additions = [], message = '') {
-  await repository.mutate(next, additions);
+  try { await repository.mutate(next, additions); }
+  catch (error) {
+    if (error instanceof RevisionConflictError) {
+      workspace = await repository.load();
+      await render();
+    }
+    throw error;
+  }
   workspace = next;
   await render();
   if (message) announce(message);
@@ -314,7 +321,19 @@ function bindEvents() {
 
 async function start() {
   bindEvents();
-  try { await repository.open(); workspace = await repository.load(); await render(); }
+  try {
+    await repository.open();
+    workspace = await repository.load();
+    if (isEmptyWorkspace(workspace)) {
+      const legacy = await readLegacyMigration();
+      if (legacy && await confirmAction('Refloom found workspace data from the previous browser-only version. Copy it into the local companion now? The legacy copy will be kept for recovery.')) {
+        await repository.mutate(legacy.workspace, legacy.binaries);
+        workspace = legacy.workspace;
+        announce('Legacy workspace copied; the original browser copy was preserved');
+      }
+    }
+    await render();
+  }
   catch (error) { $('#fatal').hidden = false; $('#fatal').textContent = error.message; for (const control of document.querySelectorAll('button,input,select,textarea')) control.disabled = true; }
 }
 

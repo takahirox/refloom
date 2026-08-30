@@ -8,7 +8,7 @@ used, the relevant aspect, and the creator's intent.
 ## Prerequisites
 
 - Node.js 22 or newer
-- A current browser with IndexedDB support
+- A current browser
 
 No package installation, account, hosted backend, or AI provider is required.
 
@@ -46,10 +46,18 @@ Project and reference deletion and the full reset action require confirmation.
 
 ## Local data and backups
 
-The workspace and captured binary assets live in the browser's IndexedDB for
-this origin. The selected project identifier lives in `localStorage`. Refloom
-does not upload or synchronize them, but browser data clearing, private browsing
-policies, profile loss, or changing the origin can make them unavailable.
+The authoritative workspace and captured media live below the repository-local
+`data/` directory by default. Set `REFLOOM_DATA_DIR` to choose another local
+directory. `data/` is ignored by Git; do not place it under a tracked source
+path. The browser talks only to the same-origin localhost companion. This
+boundary lets the UI and a later stdio MCP process coordinate through revisions
+without silently overwriting each other; MCP handlers are not implemented yet.
+
+On the first empty startup, Refloom offers to copy an existing IndexedDB
+workspace and all referenced blobs. Migration is one-way and never deletes the
+legacy browser copy. If migration fails, fix the reported missing data or export
+the legacy backup with the earlier version, then retry while server state is
+still empty. `localStorage` retains only non-authoritative project selection.
 
 Download workspace backups regularly. A backup contains the complete workspace,
 provenance, source URLs, notes, and base64-encoded captured media, so treat it as

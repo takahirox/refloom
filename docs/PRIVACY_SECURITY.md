@@ -15,15 +15,16 @@ storage is not encryption or an access-control boundary.
 
 ## Browser and server controls
 
-The server binds to `127.0.0.1` unless a caller explicitly supplies another
-host. It serves only known files under `public/` and `src/`, rejects traversal,
-does not expose directory or filesystem error details, and permits only GET and
-HEAD. Responses set MIME types, `nosniff`, frame denial, a no-referrer policy,
+The server binds to `127.0.0.1` by default. It rejects hostile Host and Origin
+values, exposes no CORS permission, serves only known files under `public/` and
+`src/`, rejects traversal, and does not expose filesystem details. Mutation APIs
+require JSON, enforce body and media limits, validate complete state, and use
+optimistic revisions. Responses set MIME types, `nosniff`, frame denial,
 cross-origin opener isolation, a restrictive Permissions Policy, and this CSP:
 
 ```text
 default-src 'self'; img-src 'self' blob:; media-src 'self' blob:;
-style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none';
+style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none';
 base-uri 'none'; frame-ancestors 'none'; form-action 'self'
 ```
 
@@ -46,10 +47,12 @@ confirmation.
 
 ## Local data and provenance
 
-Workspace JSON and media are stored in IndexedDB. Refloom makes no application
-network requests and has no hosted copy. Browser site-data tools, extensions,
-device backups, and anyone with profile access may nevertheless read or remove
-the data. Clearing browser data or changing origins can cause permanent loss.
+Workspace JSON and media are stored unencrypted below the configured local data
+directory and are exchanged only with the same-origin localhost companion.
+Filesystem permissions, backups, and anyone with account access may read or
+remove them. The default `data/` directory is Git-ignored but users must still
+avoid committing or synchronizing it. IndexedDB is retained only as a legacy
+migration/recovery copy and is never deleted automatically.
 
 Source URLs, creator fields, capture times, capture methods, and asset provenance
 are retained when provided. Provenance records user-supplied facts; it does not

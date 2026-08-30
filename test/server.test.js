@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { createRefloomServer } from '../server.mjs';
 
 let server;
 let origin;
+let dataDirectory;
 
 before(async () => {
-  server = createRefloomServer();
+  dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'refloom-server-'));
+  server = createRefloomServer({ dataDirectory });
   server.listen(0, '127.0.0.1');
   await new Promise((resolve, reject) => {
     server.once('listening', resolve);
@@ -19,6 +24,7 @@ before(async () => {
 after(async () => {
   server.closeAllConnections();
   await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  await rm(dataDirectory, { recursive: true, force: true });
 });
 
 function get(pathname, method = 'GET') {
@@ -77,6 +83,45 @@ test('missing and traversal paths return generic 404 responses', async () => {
     assert.equal(response.body.toString(), 'Not found');
     assert.doesNotMatch(response.body.toString(), /private|server\.mjs|ENOENT/);
   }
+});
+
+function call(pathname, { method = 'GET', headers = {}, body } = {}) {
+  return new Promise((resolve, reject) => {
+    const operation = request(`${origin}${pathname}`, { method, headers }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }));
+    });
+    operation.once('error', reject);
+    operation.end(body);
+  });
+}
+
+test('workspace API initializes and rejects stale revisions', async () => {
+  const initial = await call('/api/workspace');
+  assert.equal(initial.status, 200);
+  const state = JSON.parse(initial.body);
+  const committed = await call('/api/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: state.revision, workspace: state.workspace, binaries: [] }) });
+  assert.equal(committed.status, 200);
+  const stale = await call('/api/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: state.revision, workspace: state.workspace, binaries: [] }) });
+  assert.equal(stale.status, 409);
+});
+
+test('API rejects hostile host and origin values', async () => {
+  assert.equal((await call('/api/workspace', { headers: { Host: 'evil.example' } })).status, 403);
+  assert.equal((await call('/api/workspace', { headers: { Origin: 'https://evil.example' } })).status, 403);
+});
+
+test('API rejects non-JSON mutation requests and unsupported methods', async () => {
+  assert.equal((await call('/api/workspace', { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: '{}' })).status, 415);
+  const unsupported = await call('/api/workspace', { method: 'POST' });
+  assert.equal(unsupported.status, 405);
+  assert.equal(unsupported.headers.allow, 'GET, PUT');
+});
+
+test('API rejects declared oversized bodies without reading them', async () => {
+  const response = await call('/api/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Content-Length': String(41 * 1024 * 1024) } });
+  assert.equal(response.status, 413);
 });
 
 test('unsupported methods return 405 and advertise supported methods', async () => {

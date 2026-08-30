@@ -16,8 +16,10 @@ The browser code is separated into these boundaries:
 
 - `domain.js`: immutable workspace operations, relationships, validation,
   deletion cascades, factual signals, and creative-direction export.
-- `storage.js`: IndexedDB transactions, binary lifecycle, and versioned backup
-  encoding/decoding. It depends on domain validation.
+- `storage.js`: browser HTTP repository, legacy migration helpers, and stable
+  backup encoding/decoding.
+- `file-workspace-store.js`: validated revisioned envelopes, media, locking,
+  limits, atomic replacement, and orphan cleanup.
 - `ui-format.js`: presentation-only formatting and filename normalization.
 - `app.js`: DOM events, orchestration, confirmation, rendering, and downloads.
   It renders user content with text nodes rather than HTML injection.
@@ -36,14 +38,21 @@ through owned entities so boards cannot retain dangling selections.
 
 ## Storage boundaries
 
-IndexedDB database `refloom` version 1 has two object stores:
+The Node companion owns `data/workspace.json` and `data/media/`. Workspace JSON
+is a validated, independently versioned persistence envelope. Media names are
+strict opaque identifiers, never user paths. Commits serialize in-process and
+take a bounded cross-process lock, compare the caller revision, stage and sync
+media, atomically replace state with temporary-file-plus-rename, then delete
+sorted unreferenced media. State never references media before it is durable;
+an interrupted cleanup can only leave safe orphans for the next commit.
 
-- `workspace`: the validated JSON workspace at key `current`.
-- `blobs`: captured binary records addressed by the identifier following a
-  `blob:` asset locator.
+The same-origin API loads and commits complete workspaces, reads referenced
+media, and imports/exports the existing backup contract. Host and Origin checks,
+JSON and body limits, validation, and optimistic revisions protect the local
+boundary. It intentionally has no CORS policy and is not a public listener.
 
-Each mutation writes the workspace and binary changes in one transaction and
-removes unreferenced blobs. `localStorage` contains only the current project ID.
+IndexedDB remains read-only migration input. `localStorage` contains only the
+current project ID.
 Object URLs used for previews are temporary presentation resources, not durable
 storage. There is no server-side persistence.
 
@@ -51,14 +60,16 @@ storage. There is no server-side persistence.
 
 1. A UI event supplies explicit user input or captured media.
 2. A domain function returns a new validated workspace value.
-3. The repository commits workspace JSON and binary additions atomically.
+3. The HTTP repository commits workspace JSON and binary additions at its last observed revision.
 4. The application rerenders from committed state.
 5. Board export derives a read-only creative-direction package; backup export
    packages the whole workspace and referenced binaries.
 
 Import takes the reverse path: parse the backup, verify its format and workspace
 relationships, verify required binary records, then replace local state in one
-transaction. Imported strings remain data and are rendered as text.
+revisioned commit. A stale writer receives a conflict and reloads authoritative
+state. This shared boundary exists for browser capture and a future stdio MCP
+process; this milestone does not implement MCP protocol handlers.
 
 ## Versioning
 

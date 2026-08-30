@@ -17,10 +17,12 @@ const required = [
   'server.mjs',
   'src/app.js',
   'src/domain.js',
+  'src/file-workspace-store.js',
   'src/storage.js',
   'src/ui-format.js',
   'test/domain.test.js',
   'test/storage.test.js',
+  'test/file-workspace-store.test.js',
   'test/ui-format.test.js',
   'test/server.test.js',
   'scripts/check.mjs'

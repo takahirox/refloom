@@ -3,10 +3,13 @@ import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { FileWorkspaceStore, RevisionConflictError, StoreError } from './src/file-workspace-store.js';
+
+const MAX_BODY = 40 * 1024 * 1024;
 
 const types = new Map([['.html', 'text/html; charset=utf-8'], ['.css', 'text/css; charset=utf-8'], ['.js', 'text/javascript; charset=utf-8'], ['.json', 'application/json; charset=utf-8']]);
 const securityHeaders = {
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; media-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; media-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
@@ -24,6 +27,52 @@ function send(response, status, body, headers = {}) {
     ...headers
   });
   response.end(contents);
+}
+
+function json(response, status, value) { send(response, status, JSON.stringify(value), { 'Content-Type': 'application/json; charset=utf-8' }); }
+
+async function body(request) {
+  if (!(request.headers['content-type'] || '').toLowerCase().startsWith('application/json')) throw new StoreError('JSON_REQUIRED', 'Mutation requests require application/json');
+  const declared = Number(request.headers['content-length']);
+  if (Number.isFinite(declared) && declared > MAX_BODY) throw new StoreError('BODY_TOO_LARGE', 'Request body is too large');
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > MAX_BODY) throw new StoreError('BODY_TOO_LARGE', 'Request body is too large');
+    chunks.push(chunk);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw new StoreError('INVALID_JSON', 'Request body is not valid JSON'); }
+}
+
+function trustedRequest(request) {
+  const host = request.headers.host || '';
+  if (!/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host)) return false;
+  const origin = request.headers.origin;
+  if (!origin) return true;
+  try { const value = new URL(origin); return /^(?:localhost|127\.0\.0\.1|\[::1\])$/i.test(value.hostname) && value.host === host; }
+  catch { return false; }
+}
+
+async function api(request, response, pathname, store) {
+  if (pathname === '/api/workspace' && request.method === 'GET') return json(response, 200, await store.load());
+  if (pathname === '/api/workspace' && request.method === 'PUT') {
+    const value = await body(request);
+    return json(response, 200, await store.commit(value.revision, value.workspace, value.binaries));
+  }
+  if (pathname === '/api/backup' && request.method === 'GET') return send(response, 200, await store.exportBackup(), { 'Content-Type': 'application/json; charset=utf-8' });
+  if (pathname === '/api/backup' && request.method === 'PUT') {
+    const value = await body(request);
+    return json(response, 200, await store.importBackup(value.revision, JSON.stringify(value.backup)));
+  }
+  if (pathname.startsWith('/api/media/') && request.method === 'GET') {
+    const media = await store.mediaInfo(decodeURIComponent(pathname.slice('/api/media/'.length)));
+    return send(response, 200, media.contents, { 'Content-Type': media.mediaType });
+  }
+  const allow = pathname === '/api/workspace' || pathname === '/api/backup' ? 'GET, PUT' : 'GET';
+  if (pathname.startsWith('/api/')) return send(response, 405, 'Method not allowed', { Allow: allow });
+  return false;
 }
 
 function contained(root, candidate) {
@@ -54,8 +103,29 @@ async function openStream(filename) {
 
 export function createRefloomServer(options = {}) {
   const repositoryRoot = path.resolve(options.root ?? import.meta.dirname);
+  const store = options.store ?? new FileWorkspaceStore({ directory: options.dataDirectory ?? path.join(repositoryRoot, 'data') });
+  let initialized;
   return createServer(async (request, response) => {
     response.on('error', () => {});
+
+    if (!trustedRequest(request)) { send(response, 403, 'Forbidden'); return; }
+
+    let url;
+    try { url = new URL(request.url ?? '/', 'http://localhost'); }
+    catch { send(response, 400, 'Bad request'); return; }
+
+    if (url.pathname.startsWith('/api/')) {
+      try {
+        initialized ??= store.initialize();
+        await initialized;
+        await api(request, response, url.pathname, store);
+      } catch (error) {
+        const status = error instanceof RevisionConflictError ? 409 : error.code === 'BODY_TOO_LARGE' ? 413 : error.code === 'JSON_REQUIRED' ? 415 : error instanceof StoreError ? 400 : 500;
+        const headers = error.code === 'BODY_TOO_LARGE' ? { Connection: 'close' } : {};
+        send(response, status, JSON.stringify({ error: error.message, code: error.code || 'INTERNAL_ERROR' }), { 'Content-Type': 'application/json; charset=utf-8', ...headers });
+      }
+      return;
+    }
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       send(response, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
@@ -64,7 +134,6 @@ export function createRefloomServer(options = {}) {
 
     let asset;
     try {
-      const url = new URL(request.url ?? '/', 'http://localhost');
       asset = resolveAsset(repositoryRoot, decodeURIComponent(url.pathname));
     } catch {
       asset = null;

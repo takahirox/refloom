@@ -7,11 +7,20 @@ export const BLOB_PREFIX = 'blob:';
 export const BACKUP_FORMAT = 'refloom.workspace-backup';
 export const BACKUP_VERSION = 1;
 
+export class RevisionConflictError extends Error {
+  constructor(message = 'This workspace changed in another process. The latest version has been reloaded; review your change and try again.') { super(message); this.name = 'RevisionConflictError'; }
+}
+
 export class StorageUnavailableError extends Error {
-  constructor(message = 'Local storage is unavailable. Enable IndexedDB or use a browser profile that permits site data, then reload.') {
+  constructor(message = 'The local Refloom companion is unavailable. Start the localhost server, then reload.') {
     super(message);
     this.name = 'StorageUnavailableError';
   }
+}
+
+export function isEmptyWorkspace(workspace) {
+  validateWorkspace(workspace);
+  return ['projects', 'references', 'assets', 'targets', 'moments', 'selections', 'boards', 'signals'].every(name => workspace[name].length === 0);
 }
 
 export function serializeWorkspace(workspace) {
@@ -73,8 +82,59 @@ function transactionDone(transaction) {
 }
 
 export class WorkspaceRepository {
-  constructor(indexedDB = globalThis.indexedDB) { this.indexedDB = indexedDB; this.db = null; }
+  constructor(fetcher = globalThis.fetch?.bind(globalThis)) { this.fetcher = fetcher; this.revision = undefined; }
 
+  async #request(path, options = {}) {
+    if (!this.fetcher) throw new StorageUnavailableError();
+    let response;
+    try { response = await this.fetcher(path, options); }
+    catch (error) { throw new StorageUnavailableError(`Could not reach the local Refloom companion: ${error.message}`); }
+    if (response.status === 409) throw new RevisionConflictError();
+    if (!response.ok) {
+      let detail;
+      try { detail = (await response.json()).error; } catch { detail = response.statusText; }
+      throw new StorageUnavailableError(detail || `Local companion returned HTTP ${response.status}`);
+    }
+    return response;
+  }
+
+  async open() { return this; }
+
+  async load() {
+    const value = await (await this.#request('/api/workspace')).json();
+    this.revision = value.revision;
+    return importWorkspace(value.workspace);
+  }
+
+  async mutate(workspace, additions = []) {
+    validateWorkspace(workspace);
+    const binaries = [];
+    for (const item of additions) {
+      if (!item || typeof item.id !== 'string' || !(item.blob instanceof Blob)) throw new TypeError('Binary addition requires an id and Blob');
+      binaries.push({ id: item.id, name: item.name || '', type: item.blob.type, data: await blobToBase64(item.blob) });
+    }
+    try {
+      const value = await (await this.#request('/api/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: this.revision, workspace, binaries }) })).json();
+      this.revision = value.revision;
+    } catch (error) {
+      if (error instanceof RevisionConflictError) await this.load();
+      throw error;
+    }
+  }
+
+  async blob(id) { return (await this.#request(`/api/media/${encodeURIComponent(id)}`)).blob(); }
+  async exportBackup() { return (await this.#request('/api/backup')).text(); }
+  async importBackup(text) {
+    const value = await (await this.#request('/api/backup', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: this.revision, backup: JSON.parse(text) }) })).json();
+    this.revision = value.revision;
+    return importWorkspace(value.workspace);
+  }
+  async reset() { const workspace = createWorkspace(); await this.mutate(workspace); return workspace; }
+  close() {}
+}
+
+export class LegacyIndexedDBRepository {
+  constructor(indexedDB = globalThis.indexedDB) { this.indexedDB = indexedDB; this.db = null; }
   async open() {
     if (!this.indexedDB) throw new StorageUnavailableError();
     try {
@@ -142,14 +202,27 @@ export class WorkspaceRepository {
     await this.mutate(backup.workspace, additions);
     return backup.workspace;
   }
-
-  async reset() {
-    const workspace = createWorkspace();
-    await this.mutate(workspace);
-    return workspace;
+  async migrationPayload() {
+    const workspace = await this.load();
+    const binaries = [];
+    for (const id of referencedBlobIds(workspace)) {
+      const tx = this.db.transaction('blobs', 'readonly');
+      const record = await requestResult(tx.objectStore('blobs').get(id));
+      await transactionDone(tx);
+      if (!record?.blob) throw new StorageUnavailableError(`Legacy binary ${id} is missing; restore a backup before migration.`);
+      binaries.push({ id, name: record.name || '', blob: record.blob });
+    }
+    return { workspace, binaries };
   }
-
   close() { this.db?.close(); }
+}
+
+export async function readLegacyMigration(indexedDB = globalThis.indexedDB) {
+  if (!indexedDB) return null;
+  const legacy = new LegacyIndexedDBRepository(indexedDB);
+  try { await legacy.open(); const payload = await legacy.migrationPayload(); return isEmptyWorkspace(payload.workspace) ? null : payload; }
+  catch { return null; }
+  finally { legacy.close(); }
 }
 
 export function blobToBase64(blob) {
