@@ -1,0 +1,93 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { captureWebsite, connectChromeCdp } from '../src/chrome-capture.js';
+
+test('connects to only the profile-published loopback CDP page endpoint', async () => {
+  const commands = [];
+  class FakeWebSocket {
+    constructor(url) { this.url = url; this.listeners = new Map(); queueMicrotask(() => this.emit('open', {})); }
+    addEventListener(name, listener) { const list = this.listeners.get(name) || []; list.push(listener); this.listeners.set(name, list); }
+    emit(name, value) { for (const listener of this.listeners.get(name) || []) listener(value); }
+    send(text) {
+      const command = JSON.parse(text); commands.push(command);
+      const result = command.method === 'Runtime.evaluate' ? { result: { value: 'ready' } } : {};
+      queueMicrotask(() => this.emit('message', { data: JSON.stringify({ id: command.id, result }) }));
+    }
+    close() { this.emit('close', {}); }
+  }
+  const cdp = await connectChromeCdp({}, {
+    profile: '/isolated/profile',
+    readFile: async filename => { assert.equal(filename, '/isolated/profile/DevToolsActivePort'); return '9222\n/devtools/browser/id\n'; },
+    fetch: async url => ({ ok: true, json: async () => [{ id: 'page-one', type: 'page', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/one' }] }),
+    WebSocket: FakeWebSocket
+  });
+  assert.equal(cdp.targetId, 'page-one');
+  assert.equal(await cdp.evaluate('1 + 1'), 'ready');
+  assert.equal(commands[0].method, 'Runtime.evaluate');
+  await cdp.close();
+});
+
+test('drives bounded deterministic checkpoints and always cleans up', async () => {
+  const calls = [];
+  const removed = [];
+  let proxyClosed = false;
+  let processKilled = false;
+  const process = new EventEmitter();
+  process.kill = () => { processKilled = true; };
+  const cdp = {
+    send: async (method, params) => {
+      calls.push([method, params]);
+      if (method === 'Page.captureScreenshot') return { data: Buffer.from(`png-${calls.length}`).toString('base64') };
+      return {};
+    },
+    evaluate: async expression => expression.startsWith('({')
+      ? { title: 'Example', url: 'https://example.com/', width: 1440, height: 2700, viewportWidth: 1440, viewportHeight: 900 }
+      : undefined,
+    waitFor: async () => {}, on() {}, close: async () => {}
+  };
+  const result = await captureWebsite('https://example.com', {
+    resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+    executable: '/fake/chrome',
+    fs: {
+      access: async () => {}, mkdtemp: async () => '/tmp/refloom-test',
+      rm: async value => removed.push(value)
+    },
+    spawn: (_file, args) => { calls.push(['spawn', args]); return process; },
+    createProxy: () => ({
+      listen: async () => ({ port: 43210 }),
+      close: async () => { proxyClosed = true; }
+    }),
+    connectCdp: async () => cdp,
+    clock: { setTimeout: (fn, ms) => setTimeout(fn, ms) },
+    settleMs: 0,
+    readinessMs: 0,
+    checkpoints: 3,
+    now: () => '2026-08-30T00:00:00.000Z'
+  });
+  assert.deepEqual(result.screenshots.map(value => value.y), [0, 900, 1800]);
+  assert.equal(calls.some(([method]) => method === 'Browser.setDownloadBehavior'), true);
+  assert.equal(calls.some(([method]) => method === 'Network.setBypassServiceWorker'), true);
+  const args = calls.find(([method]) => method === 'spawn')[1];
+  assert.equal(args.includes('--remote-debugging-port=0'), true);
+  assert.equal(args.includes('--disable-quic'), true);
+  assert.equal(args.some(value => value.includes('disable_non_proxied_udp')), true);
+  assert.equal(proxyClosed, true);
+  assert.equal(processKilled, true);
+  assert.deepEqual(removed, ['/tmp/refloom-test']);
+});
+
+test('browser failures are generic and cleanup remains guaranteed', async () => {
+  let removed = false;
+  let closed = false;
+  await assert.rejects(captureWebsite('https://example.com', {
+    resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+    executable: '/secret/path/chrome',
+    fs: { access: async () => {}, mkdtemp: async () => '/secret/profile', rm: async () => { removed = true; } },
+    spawn: () => ({ kill() {} }),
+    createProxy: () => ({ listen: async () => ({ port: 1 }), close: async () => { closed = true; } }),
+    connectCdp: async () => { throw new Error('/secret/path/chrome crashed'); }
+  }), { message: 'Website capture failed.' });
+  assert.equal(removed, true);
+  assert.equal(closed, true);
+});
