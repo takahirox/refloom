@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
+    "mcp": "node mcp-server.mjs",
     "test": "node --test",
     "check": "node scripts/check.mjs"
   },
@@ -12,4 +13,3 @@
     "node": ">=22"
   }
 }
-

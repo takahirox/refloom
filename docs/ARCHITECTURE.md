@@ -23,6 +23,9 @@ The browser code is separated into these boundaries:
 - `ui-format.js`: presentation-only formatting and filename normalization.
 - `app.js`: DOM events, orchestration, confirmation, rendering, and downloads.
   It renders user content with text nodes rather than HTML injection.
+- `mcp-server.mjs`: dependency-free newline-delimited JSON-RPC stdio transport,
+  progressive read tools, additive mutation tools, structured errors, and
+  registered-media MCP resources.
 
 ## Domain boundaries
 
@@ -56,6 +59,20 @@ current project ID.
 Object URLs used for previews are temporary presentation resources, not durable
 storage. There is no server-side persistence.
 
+The MCP process opens the same configured `FileWorkspaceStore`. Every mutation
+loads an authoritative revision, applies one domain operation, and commits with
+optimistic revision comparison under the store's cross-process lock. An
+explicit stale `expectedRevision`, or a race after loading, produces
+`REVISION_CONFLICT`; the server never retries against changed state or silently
+merges an agent's assumptions.
+
+MCP resource URIs contain only opaque media IDs. Resource discovery is derived
+from current blob-backed assets, and resource reads call `mediaInfo`, which
+rechecks that the blob is referenced by authoritative state before reading it.
+The protocol exposes no file URI, path argument, backup replacement, deletion,
+or general workspace commit surface. URL assets remain metadata and are not
+fetched by the server.
+
 ## Data flow
 
 1. A UI event supplies explicit user input or captured media.
@@ -68,8 +85,7 @@ storage. There is no server-side persistence.
 Import takes the reverse path: parse the backup, verify its format and workspace
 relationships, verify required binary records, then replace local state in one
 revisioned commit. A stale writer receives a conflict and reloads authoritative
-state. This shared boundary exists for browser capture and a future stdio MCP
-process; this milestone does not implement MCP protocol handlers.
+state. The browser and stdio MCP process use this same shared boundary.
 
 ## Versioning
 

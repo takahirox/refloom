@@ -15,6 +15,7 @@ const required = [
   'public/index.html',
   'public/styles.css',
   'server.mjs',
+  'mcp-server.mjs',
   'src/app.js',
   'src/domain.js',
   'src/file-workspace-store.js',
@@ -25,6 +26,7 @@ const required = [
   'test/file-workspace-store.test.js',
   'test/ui-format.test.js',
   'test/server.test.js',
+  'test/mcp-server.test.js',
   'scripts/check.mjs'
 ];
 

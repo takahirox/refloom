@@ -5,7 +5,8 @@
 Refloom 0.1 assumes one person running the application on a device and browser
 profile they control. Relevant risks include malicious or malformed imported
 backups, untrusted reference text and URLs, accidental local-data loss, exposure
-of sensitive backups, another local process reaching the HTTP server, and a
+of sensitive backups, another local process reaching the HTTP server, an AI
+agent receiving more local data or mutation authority than intended, and a
 future code change weakening browser isolation.
 
 Refloom does not defend against a compromised operating system or browser,
@@ -31,6 +32,26 @@ base-uri 'none'; frame-ancestors 'none'; form-action 'self'
 The CSP permits local scripts/styles and locally created image/video blob URLs.
 It blocks network connections, plugins, external bases, and framing. It is
 defense in depth, not a substitute for safe rendering.
+
+## MCP boundary
+
+The MCP server is a local child process with the operating-system permissions of
+the user who launches Codex. Configure an explicit absolute data directory and
+review project-local Codex configuration before trusting it. Refloom never
+silently edits user or project Codex configuration.
+
+The exposed tool surface is deliberately narrower than the browser: reads are
+bounded and progressively disclosed; mutations are additive except for explicit
+reference-field enrichment; and destructive, backup-import, reorder, reset, and
+general workspace-write operations are absent. Optimistic revisions and the
+shared filesystem lock reject stale concurrent writes.
+
+Media reads accept only `refloom://media/<opaque-id>` resources derived from
+registered blob-backed assets. The store verifies current authoritative
+references again before reading bytes. MIME metadata and provenance accompany
+the resource. Tools accept no filesystem paths, and URL assets are registered
+without server-side network fetching. Protocol responses are the only stdout
+output; startup and malformed-input diagnostics go to stderr.
 
 ## Safe rendering and imports
 

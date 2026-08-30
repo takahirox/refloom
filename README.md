@@ -24,9 +24,53 @@ Set `PORT` to choose another port.
 ```sh
 npm test
 npm run check
+npm run mcp
 ```
 
 `npm test` runs the domain, storage, formatting, and HTTP integration tests.
+
+## Codex MCP setup
+
+Refloom includes a dependency-free local stdio MCP server. It shares the exact
+revisioned `FileWorkspaceStore` used by the browser and writes diagnostics only
+to stderr. Stop a manually started `npm run mcp` before asking Codex to launch
+its configured copy.
+
+Add the following to this repository's `.codex/config.toml` (create it if
+needed), replacing the two absolute paths. Refloom does not create or modify
+Codex configuration automatically:
+
+```toml
+[mcp_servers.refloom]
+command = "node"
+args = ["/absolute/path/to/refloom/mcp-server.mjs"]
+cwd = "/absolute/path/to/refloom"
+env = { REFLOOM_DATA_DIR = "/absolute/path/to/refloom/data" }
+```
+
+Restart Codex in the project and approve/trust the project configuration when
+prompted. For a user-local installation, put the same table in
+`~/.codex/config.toml`; project configuration is preferable when the data path
+is repository-specific. The server supports the current newline-delimited
+JSON-RPC stdio transport and MCP protocol version `2025-06-18`. The equivalent
+user-local CLI command is:
+
+```sh
+codex mcp add refloom --env REFLOOM_DATA_DIR=/absolute/path/to/refloom/data -- node /absolute/path/to/refloom/mcp-server.mjs
+```
+
+Read tools progressively disclose project and board summaries before paginated
+reference/selection search, exact reference/selection detail, and creative
+direction. Write tools only append references, assets, targets, moments,
+selections, or board membership, or enrich descriptive reference fields. There
+are no delete, remove, reset, import, reorder, or arbitrary workspace-write
+tools. Supply `expectedRevision` when coordinating multiple agents; stale
+mutations return `REVISION_CONFLICT` instead of overwriting newer state.
+
+Captured binary media is exposed as `refloom://media/<opaque-id>` MCP resources.
+Only media currently referenced by a registered workspace asset can be read;
+filesystem paths and unregistered blobs are rejected. Resource MIME type and
+asset provenance are returned with the bytes.
 `npm run check` verifies required deliverables, JavaScript syntax, and safe
 rendering constraints.
 
@@ -50,8 +94,8 @@ The authoritative workspace and captured media live below the repository-local
 `data/` directory by default. Set `REFLOOM_DATA_DIR` to choose another local
 directory. `data/` is ignored by Git; do not place it under a tracked source
 path. The browser talks only to the same-origin localhost companion. This
-boundary lets the UI and a later stdio MCP process coordinate through revisions
-without silently overwriting each other; MCP handlers are not implemented yet.
+boundary lets the UI and the stdio MCP process coordinate through revisions
+without silently overwriting each other.
 
 On the first empty startup, Refloom offers to copy an existing IndexedDB
 workspace and all referenced blobs. Migration is one-way and never deletes the
