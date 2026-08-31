@@ -40,11 +40,11 @@ worker:
   preferred: "codex_cli"
   allowed: ["codex_cli"]
   allowed_strategy_ids: ["codex-sol-high"]
-  adaptive_routing: false
+  adaptive_routing: true
   local_backend: false
 budgets:
   wall_seconds: 1800.0
-  worker_turns: 1
+  worker_turns: 12
   processes: 40
   download_bytes: 0
   artifact_bytes: 100000000
