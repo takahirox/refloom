@@ -8,7 +8,7 @@ commands:
     cwd: "."
 rules: []
 paths:
-  writable: ["src/**", "test/**", "scripts/**", "docs/**", "public/**", "README.md", "server.mjs", "package.json", "LICENSE", ".gitignore"]
+  writable: ["src/**", "test/**", "scripts/**", "docs/**", "public/**", "migrations/**", "README.md", "server.mjs", "mcp-server.mjs", "package.json", "package-lock.json", "compose.yaml", "Dockerfile", "LICENSE", ".gitignore"]
   protected: [".git/**", ".fleet/**", ".env*", ".github/workflows/**"]
   generated: ["coverage/**", "tmp/**", "data/**"]
 verification:
@@ -18,21 +18,21 @@ verification:
     required: true
     block_severities: ["critical", "high"]
 network:
-  mode: "disabled"
-  https_domains: []
-  ports: []
+  mode: "restricted"
+  https_domains: ["registry.npmjs.org"]
+  ports: [443]
 install:
-  ecosystems: []
+  ecosystems: ["node_project"]
   existing_lock: "deny"
-  new_dependency: "deny"
-  manifest_lock_mutation: "deny"
+  new_dependency: "approval"
+  manifest_lock_mutation: "approval"
   lifecycle_scripts: "deny"
   new_registry_domain: "deny"
   host_global: "deny"
 approvals:
   process_shell: "required"
-  new_dependency: "deny"
-  manifest_lock_mutation: "deny"
+  new_dependency: "required"
+  manifest_lock_mutation: "required"
   lifecycle_scripts: "deny"
   new_registry_domain: "deny"
   promotion: "required"
