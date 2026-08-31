@@ -1,5 +1,5 @@
 import { createAsset, createMoment, createTarget } from './domain.js';
-import { RevisionConflictError } from './file-workspace-store.js';
+import { RevisionConflictError } from './persistence-errors.js';
 import { captureWebsite, validateCaptureSettings } from './chrome-capture.js';
 import { normalizeCaptureUrl } from './capture-url.js';
 
@@ -93,7 +93,12 @@ export async function captureReference(store, referenceId, settings = {}, depend
           if (!current.workspace.references.some(item => item.id === referenceId)) throw new Error(ERROR.FAILED);
           const next = appendCheckpoint(current.workspace, referenceId, screenshot, entityIds);
           try {
-            await store.commit(current.revision, next, [{ id: entityIds.mediaId, data: screenshot.png }]);
+            await store.commit(current.revision, next, [{
+              id: entityIds.mediaId,
+              data: screenshot.png,
+              type: 'image/png',
+              name: `${entityIds.mediaId}.png`
+            }]);
             captured.push(entityIds);
             return;
           } catch (error) {

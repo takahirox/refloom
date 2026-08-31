@@ -1,25 +1,59 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, test } from 'node:test';
+import { test } from 'node:test';
 import { createProject, createReference, createWorkspace, updateProject } from '../src/domain.js';
-import { FileWorkspaceStore } from '../src/file-workspace-store.js';
+import { RevisionConflictError } from '../src/persistence-errors.js';
+import { encodeBackup, referencedBlobIds } from '../src/storage.js';
 import { captureReference } from '../src/website-capture-service.js';
 
-const directories = [];
 const resolver = async () => [{ address: '93.184.216.34', family: 4 }];
+
+class MemoryRepository {
+  constructor() {
+    this.revision = 0;
+    this.workspace = createWorkspace();
+    this.media = new Map();
+    this.limits = { mediaBytes: 25 * 1024 * 1024 };
+  }
+
+  async load() {
+    return { revision: this.revision, workspace: structuredClone(this.workspace) };
+  }
+
+  async commit(expectedRevision, workspace, additions = []) {
+    if (expectedRevision !== this.revision) {
+      throw new RevisionConflictError(expectedRevision, this.revision);
+    }
+    const nextMedia = new Map(this.media);
+    for (const addition of additions) {
+      const bytes = Buffer.from(addition.data, 'base64');
+      if (bytes.length > this.limits.mediaBytes) throw new Error('media limit');
+      nextMedia.set(addition.id, {
+        data: addition.data,
+        type: addition.type ?? '',
+        name: addition.name ?? ''
+      });
+    }
+    const retained = referencedBlobIds(workspace);
+    for (const id of retained) if (!nextMedia.has(id)) throw new Error(`missing media ${id}`);
+    for (const id of nextMedia.keys()) if (!retained.has(id)) nextMedia.delete(id);
+    this.workspace = structuredClone(workspace);
+    this.media = nextMedia;
+    this.revision += 1;
+    return this.load();
+  }
+
+  async exportBackup() {
+    return encodeBackup(this.workspace, [...this.media].map(([id, value]) => ({ id, ...value })));
+  }
+}
+
 async function fixture(sourceUrl = 'https://example.com/page') {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'refloom-capture-service-'));
-  directories.push(directory);
-  const store = new FileWorkspaceStore({ directory });
-  await store.initialize();
+  const store = new MemoryRepository();
   let workspace = createProject(createWorkspace(), { id: 'project-1', title: 'Original' });
   workspace = createReference(workspace, { id: 'reference-1', projectId: 'project-1', sourceUrl });
   await store.commit(0, workspace);
   return store;
 }
-afterEach(async () => Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))));
 
 function screenshot(index = 0, count = 1) {
   return {
@@ -69,6 +103,8 @@ test('persists complete capture provenance, relationships, and backup bytes', as
   assert.deepEqual(moment.state, asset.provenance);
   const backup = JSON.parse(await store.exportBackup());
   assert.equal(backup.binaries[0].data, Buffer.from('png-0').toString('base64'));
+  assert.equal(backup.binaries[0].type, 'image/png');
+  assert.equal(backup.binaries[0].name, 'capture_media-1.png');
 });
 
 test('failure before the first callback leaves the reference unchanged', async () => {

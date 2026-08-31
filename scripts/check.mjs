@@ -1,4 +1,4 @@
-import { access, readdir } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
@@ -20,7 +20,14 @@ const required = [
   'mcp-server.mjs',
   'src/app.js',
   'src/domain.js',
-  'src/file-workspace-store.js',
+  'src/create-persistence-repository.js',
+  'src/persistence-config.js',
+  'src/persistence-errors.js',
+  'src/persistence-repository.js',
+  'src/postgres-migrations.js',
+  'src/postgres-workspace-mapper.js',
+  'src/postgres-workspace-repository.js',
+  'src/s3-media-store.js',
   'src/storage.js',
   'src/ui-format.js',
   'src/capture-url.js',
@@ -34,7 +41,12 @@ const required = [
   'test/website-capture-service.test.js',
   'test/domain.test.js',
   'test/storage.test.js',
-  'test/file-workspace-store.test.js',
+  'test/create-persistence-repository.test.js',
+  'test/persistence-config.test.js',
+  'test/postgres-migrations.test.js',
+  'test/postgres-workspace-mapper.test.js',
+  'test/postgres-workspace-repository.test.js',
+  'test/s3-media-store.test.js',
   'test/ui-format.test.js',
   'test/server.test.js',
   'test/mcp-server.test.js',
@@ -81,6 +93,24 @@ const forbidden = [
 ];
 for (const [label, pattern] of forbidden) if (pattern.test(`${html}\n${app}`)) {
   console.error(`Forbidden rendering mechanism found: ${label}`);
+  process.exitCode = 1;
+}
+
+const persistenceSources = await Promise.all([
+  'server.mjs', 'mcp-server.mjs', 'src', 'test'
+].map(async entry => {
+  const absolute = path.join(root, entry);
+  const files = entry === 'src' || entry === 'test' ? await modules(absolute) : [absolute];
+  return Promise.all(files.map(file => readFile(file, 'utf8')));
+}));
+const removedPersistence = [
+  ['IndexedDB authority', /\b(?:indexedDB|IDBDatabase)\b/],
+  ['file workspace store', /\bFileWorkspaceStore\b|file-workspace-store/],
+  ['local data directory', /\bREFLOOM_DATA_DIR\b|\bdataDirectory\b/]
+];
+const persistenceText = persistenceSources.flat(2).join('\n');
+for (const [label, pattern] of removedPersistence) if (pattern.test(persistenceText)) {
+  console.error(`Removed persistence path found: ${label}`);
   process.exitCode = 1;
 }
 
