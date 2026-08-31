@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createAsset, createProject, createReference, createWorkspace } from '../src/domain.js';
 import { PersistenceError, RevisionConflictError } from '../src/persistence-errors.js';
 import { PostgresWorkspaceRepository } from '../src/postgres-workspace-repository.js';
+import { workspaceToRows } from '../src/postgres-workspace-mapper.js';
 import { encodeBackup } from '../src/storage.js';
 
 const emptyRows = () => ({
@@ -207,9 +208,11 @@ test('cleanup passes exactly current media_objects IDs', async () => {
   assert.deepEqual([...options.referencedIds], ['keep-a', 'keep-b']);
 });
 
-test('backup export uses load/media paths and import uses revision-checked commit', async () => {
+test('backup export captures one snapshot then fetches verified objects as backup v2', async () => {
   const workspace = workspaceWithBlob();
-  const pool = new FakePool(text => {
+  const events = [];
+  const pool = new FakePool((text, values, client) => {
+    events.push(text);
     if (text.startsWith('select revision')) return { rows: [{ revision: 3 }] };
     if (text.startsWith('select * from projects')) return { rows: [{
       id: 'p', title: 'Project', brief: null,
@@ -226,15 +229,86 @@ test('backup export uses load/media paths and import uses revision-checked commi
       created_at: workspace.assets[0].createdAt, updated_at: workspace.assets[0].updatedAt
     }] };
     if (text.startsWith('select *')) return { rows: [] };
-    if (text.includes('from media_objects m')) return { rows: [{
+    if (text.includes('from media_objects where id = any')) return { rows: [{
       id: 'blob_1', sha256: 'a'.repeat(64), size_bytes: 5,
       media_type: 'text/plain', original_name: 'hello.txt'
     }] };
     return { rows: [] };
   });
-  const repository = new PostgresWorkspaceRepository({ pool, mediaStore: new FakeMediaStore() });
+  const mediaStore = new FakeMediaStore();
+  const originalGet = mediaStore.get.bind(mediaStore);
+  mediaStore.get = async metadata => {
+    events.push('s3:get');
+    return originalGet(metadata);
+  };
+  const repository = new PostgresWorkspaceRepository({ pool, mediaStore });
   const backup = JSON.parse(await repository.exportBackup());
+  assert.equal(backup.version, 2);
   assert.equal(backup.binaries[0].data, 'aGVsbG8=');
+  assert.equal(backup.binaries[0].type, 'text/plain');
+  assert.equal(backup.binaries[0].name, 'hello.txt');
+  assert.equal(backup.binaries[0].size, 5);
+  const metadataQuery = pool.queries.find(item =>
+    item.text.includes('from media_objects where id = any'));
+  assert.deepEqual(metadataQuery.values, [['blob_1']]);
+  assert.equal(metadataQuery.text.includes('blob_1'), false);
+  assert.ok(pool.queries.every(item => item.client));
+  assert.ok(events.indexOf('begin isolation level repeatable read read only')
+    < events.indexOf('select revision from workspace_state where singleton = true'));
+  assert.ok(events.indexOf('commit') < events.indexOf('s3:get'));
+  assert.equal(pool.released, true);
+  assert.deepEqual(mediaStore.calls[0], ['get', {
+    id: 'blob_1', size: 5, sha256: 'a'.repeat(64)
+  }]);
+});
+
+test('backup export rolls back missing metadata without fetching S3', async () => {
+  const workspace = workspaceWithBlob();
+  const rows = workspaceToRows(workspace);
+  const pool = new FakePool(text => {
+    if (text.startsWith('select revision')) return { rows: [{ revision: 3 }] };
+    for (const [table, tableRows] of Object.entries(rows)) {
+      if (text.startsWith(`select * from ${table}`)) return { rows: tableRows };
+    }
+    return { rows: [] };
+  });
+  const mediaStore = new FakeMediaStore();
+  await assert.rejects(new PostgresWorkspaceRepository({ pool, mediaStore }).exportBackup(),
+    error => error.code === 'MISSING_MEDIA');
+  assert.ok(pool.queries.some(item => item.text === 'rollback'));
+  assert.equal(pool.queries.some(item => item.text === 'commit'), false);
+  assert.equal(pool.released, true);
+  assert.equal(mediaStore.calls.length, 0);
+});
+
+test('backup export propagates verified S3 failure after committing snapshot', async () => {
+  const workspace = workspaceWithBlob();
+  const rows = workspaceToRows(workspace);
+  const pool = new FakePool(text => {
+    if (text.startsWith('select revision')) return { rows: [{ revision: 3 }] };
+    for (const [table, tableRows] of Object.entries(rows)) {
+      if (text.startsWith(`select * from ${table}`)) return { rows: tableRows };
+    }
+    if (text.includes('from media_objects where id = any')) return { rows: [{
+      id: 'blob_1', sha256: 'a'.repeat(64), size_bytes: 5,
+      media_type: 'text/plain', original_name: 'hello.txt'
+    }] };
+    return { rows: [] };
+  });
+  const mediaStore = new FakeMediaStore();
+  mediaStore.get = async () => { throw new Error('object changed'); };
+  await assert.rejects(new PostgresWorkspaceRepository({ pool, mediaStore }).exportBackup(),
+    /backup export failed/);
+  assert.ok(pool.queries.some(item => item.text === 'commit'));
+  assert.equal(pool.queries.some(item => item.text === 'rollback'), false);
+  assert.equal(pool.released, true);
+});
+
+test('backup import fully decodes v2 before invoking commit', async () => {
+  const workspace = workspaceWithBlob();
+  const repository = new PostgresWorkspaceRepository({
+    pool: new FakePool(() => ({ rows: [] })), mediaStore: new FakeMediaStore()
+  });
 
   let committed;
   repository.commit = async (...args) => { committed = args; return { revision: 4, workspace }; };
@@ -244,6 +318,18 @@ test('backup export uses load/media paths and import uses revision-checked commi
   assert.equal(committed[0], 3);
   assert.deepEqual(committed[1], workspace);
   assert.equal(committed[2][0].id, 'blob_1');
+
+  committed = undefined;
+  await assert.rejects(repository.importBackup(3, '{'), error =>
+    error instanceof PersistenceError && /backup import failed/.test(error.message)
+      && /valid JSON/.test(error.cause?.message));
+  assert.equal(committed, undefined);
+  await assert.rejects(repository.importBackup(3, JSON.stringify({
+    format: 'refloom.workspace-backup', version: 1,
+    workspace, binaries: []
+  })), error => error instanceof PersistenceError
+    && /backup import failed/.test(error.message) && /version/.test(error.cause?.message));
+  assert.equal(committed, undefined);
 });
 
 test('close ends the pool once', async () => {

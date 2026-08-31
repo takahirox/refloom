@@ -30,6 +30,7 @@ const SELECTS = Object.freeze({
 
 const RETAINED_MEDIA = `select id, object_key, sha256, size_bytes, media_type, original_name
   from media_objects where id = any($1::text[])`;
+const VALID_SHA256 = /^[0-9a-f]{64}$/;
 const REFERENCED_MEDIA = `select m.id, m.sha256, m.size_bytes, m.media_type, m.original_name
   from media_objects m
   where m.id = $1
@@ -199,18 +200,70 @@ export class PostgresWorkspaceRepository extends PersistenceRepository {
   }
 
   async exportBackup() {
+    let client;
+    let transaction = false;
     try {
-      const { workspace } = await this.load();
+      client = await this.pool.connect();
+      let workspace;
+      let metadata;
+      try {
+        await client.query('begin isolation level repeatable read read only');
+        transaction = true;
+        ({ workspace } = await loaded(client));
+        const ids = [...referencedBlobIds(workspace)].sort();
+        const rows = (await client.query(
+          `select id, sha256, size_bytes, media_type, original_name
+            from media_objects where id = any($1::text[])`, [ids]
+        )).rows;
+        const byId = new Map();
+        for (const row of rows) {
+          const size = Number(row.size_bytes);
+          if (!ids.includes(row.id) || byId.has(row.id)
+            || !Number.isSafeInteger(size) || size < 0
+            || !VALID_SHA256.test(row.sha256)
+            || (row.media_type !== null && typeof row.media_type !== 'string')
+            || (row.original_name !== null && typeof row.original_name !== 'string')) {
+            throw new MediaPersistenceError(
+              'INVALID_MEDIA', 'Referenced media metadata is invalid', { id: row.id }
+            );
+          }
+          byId.set(row.id, {
+            id: row.id, size, sha256: row.sha256,
+            type: row.media_type ?? '', name: row.original_name ?? ''
+          });
+        }
+        const missing = ids.find(id => !byId.has(id));
+        if (missing) {
+          throw new MediaPersistenceError(
+            'MISSING_MEDIA', 'Referenced media is missing', { id: missing }
+          );
+        }
+        metadata = ids.map(id => byId.get(id));
+        await client.query('commit');
+        transaction = false;
+      } catch (error) {
+        if (transaction) {
+          try { await client.query('rollback'); } catch {}
+        }
+        throw error;
+      } finally {
+        client.release();
+        client = undefined;
+      }
+
       const binaries = [];
-      for (const id of [...referencedBlobIds(workspace)].sort()) {
-        const media = await this.mediaInfo(id);
+      for (const item of metadata) {
+        const contents = await this.mediaStore.get({
+          id: item.id, size: item.size, sha256: item.sha256
+        });
         binaries.push({
-          id, type: media.mediaType, name: media.name,
-          data: media.contents.toString('base64')
+          id: item.id, type: item.type, name: item.name,
+          data: contents.toString('base64')
         });
       }
       return encodeBackup(workspace, binaries);
     } catch (error) { safe(error, 'backup export'); }
+    finally { client?.release(); }
   }
 
   async importBackup(expectedRevision, text) {
