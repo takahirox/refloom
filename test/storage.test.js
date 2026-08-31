@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAsset, createProject, createReference, createWorkspace } from '../src/domain.js';
 import {
-  BACKUP_FORMAT, blobIdFromLocator, decodeBackup, deserializeWorkspace,
+  BACKUP_FORMAT, BACKUP_VERSION, blobIdFromLocator, decodeBackup, deserializeWorkspace,
   encodeBackup, referencedBlobIds, serializeWorkspace, WorkspaceRepository
 } from '../src/storage.js';
 
@@ -25,41 +25,76 @@ test('blob locator helpers distinguish local binaries', () => {
   assert.deepEqual([...referencedBlobIds(workspaceWithBlob())], ['binary-1']);
 });
 
-test('backup encoding includes validated workspace and binaries', () => {
+const zero = { id: 'binary-1', type: 'image/png', name: 'one.png', size: 1, sha256: '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d', data: 'AA==' };
+
+test('backup encoding is deterministic, cloned, sorted, and integrity checked', () => {
   const workspace = workspaceWithBlob();
   const text = encodeBackup(workspace, [{ id: 'binary-1', type: 'image/png', name: 'one.png', data: 'AA==' }]);
   const parsed = JSON.parse(text);
   assert.equal(parsed.format, BACKUP_FORMAT);
-  assert.deepEqual(decodeBackup(text), {
-    workspace,
-    binaries: [{ id: 'binary-1', type: 'image/png', name: 'one.png', data: 'AA==' }]
-  });
+  assert.equal(parsed.version, BACKUP_VERSION);
+  assert.deepEqual(parsed.binaries[0], zero);
+  assert.deepEqual(Object.keys(parsed.binaries[0]), ['id', 'type', 'name', 'size', 'sha256', 'data']);
+  assert.deepEqual(decodeBackup(text), { workspace, binaries: [zero] });
+  parsed.workspace.projects[0].title = 'mutated';
+  parsed.binaries[0].name = 'mutated';
+  assert.equal(workspace.projects[0].title, 'Test');
+  assert.equal(encodeBackup(workspace, [{ id: 'binary-1', type: 'image/png', name: 'one.png', data: 'AA==' }]), text);
 });
 
-test('backup decoder rejects unsupported, corrupt, and incomplete backups', () => {
+test('backup encoding rejects invalid and inconsistent binary records', () => {
+  const workspace = workspaceWithBlob();
+  assert.throws(() => encodeBackup(workspace, [{ ...zero, data: 'A===' }]), /base64/i);
+  assert.throws(() => encodeBackup(workspace, [{ ...zero, id: '../bad' }]), /invalid/i);
+  assert.throws(() => encodeBackup(workspace, [{ ...zero, type: 1 }]), /invalid/i);
+  assert.throws(() => encodeBackup(workspace, [{ ...zero, name: 1 }]), /invalid/i);
+  assert.throws(() => encodeBackup(workspace, [{ ...zero, size: 2 }]), /size/i);
+  assert.throws(() => encodeBackup(workspace, [{ ...zero, sha256: 'A'.repeat(64) }]), /SHA-256/i);
+  assert.throws(() => encodeBackup(workspace, [zero, zero]), /duplicated/i);
+  assert.throws(() => encodeBackup(workspace, []), /missing/i);
+  assert.throws(() => encodeBackup(workspace, [zero, { ...zero, id: 'orphan' }]), /orphaned/i);
+});
+
+test('backup decoder rejects unsupported envelopes and workspace errors', () => {
   const workspace = workspaceWithBlob();
   assert.throws(() => decodeBackup('{}'), /unsupported/i);
   assert.throws(() => decodeBackup('{'), /valid JSON/i);
   assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 99, workspace, binaries: [] })), /unsupported/i);
-  assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 1, workspace, binaries: [] })), /missing binary/i);
-  assert.throws(() => decodeBackup(JSON.stringify({
-    format: BACKUP_FORMAT,
-    version: 1,
-    workspace,
-    binaries: [
-      { id: 'binary-1', type: 'image/png', data: 'AA==' },
-      { id: 'binary-1', type: 'image/png', data: 'AA==' }
-    ]
-  })), /corrupt/i);
+  assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 1, workspace, binaries: [zero] })), /version/i);
+  assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 2, workspace: { version: 999 }, binaries: [zero] })), /validation/i);
 });
 
-test('backup decoder omits orphaned binary records', () => {
+test('backup decoder validates exact records, correspondence, size, and digest', () => {
   const workspace = workspaceWithBlob();
-  const backup = decodeBackup(encodeBackup(workspace, [
-    { id: 'binary-1', type: 'image/png', data: 'AA==' },
-    { id: 'orphan', type: 'image/png', data: 'AA==' }
-  ]));
-  assert.deepEqual(backup.binaries.map(item => item.id), ['binary-1']);
+  const envelope = binaries => JSON.stringify({ format: BACKUP_FORMAT, version: 2, workspace, binaries });
+  assert.throws(() => decodeBackup(envelope([])), /missing/i);
+  assert.throws(() => decodeBackup(envelope([zero, zero])), /duplicated/i);
+  assert.throws(() => decodeBackup(envelope([zero, { ...zero, id: 'orphan' }])), /orphaned/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, data: 'A===' }])), /base64/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, id: '../bad' }])), /invalid/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, type: 1 }])), /invalid/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, name: 1 }])), /invalid/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, size: -1 }])), /size/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, size: 2 }])), /size/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, sha256: zero.sha256.toUpperCase() }])), /SHA-256/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, sha256: '0'.repeat(64) }])), /SHA-256/i);
+  assert.throws(() => decodeBackup(envelope([{ ...zero, extra: true }])), /keys/i);
+  const { name, ...missingName } = zero;
+  assert.throws(() => decodeBackup(envelope([missingName])), /keys/i);
+  const wrongOrder = { type: zero.type, id: zero.id, name: zero.name, size: zero.size, sha256: zero.sha256, data: zero.data };
+  assert.throws(() => decodeBackup(envelope([wrongOrder])), /keys/i);
+});
+
+test('backup decoder returns sorted cloned data', () => {
+  let workspace = workspaceWithBlob();
+  workspace = createAsset(workspace, { id: 'asset-2', referenceId: 'reference-1', kind: 'image', locator: 'blob:binary-0' });
+  const other = { ...zero, id: 'binary-0' };
+  const backup = decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 2, workspace, binaries: [zero, other] }));
+  assert.deepEqual(backup.binaries.map(item => item.id), ['binary-0', 'binary-1']);
+  backup.workspace.projects[0].title = 'mutated';
+  backup.binaries[0].name = 'mutated';
+  assert.equal(workspace.projects[0].title, 'Test');
+  assert.equal(other.name, 'one.png');
 });
 
 test('WorkspaceRepository sends a bounded website capture request', async () => {

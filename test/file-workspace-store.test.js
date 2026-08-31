@@ -56,7 +56,7 @@ test('backup export and import round trip workspace and media', async () => {
   await source.commit(0, workspace, [{ id: 'binary-1', type: 'image/png', name: 'one.png', data: 'AA==' }]);
   const target = await fixture();
   const backup = await source.exportBackup();
-  assert.deepEqual(JSON.parse(backup).binaries[0], { id: 'binary-1', type: 'image/png', name: 'one.png', data: 'AA==' });
+  assert.deepEqual(JSON.parse(backup).binaries[0], { id: 'binary-1', type: 'image/png', name: 'one.png', size: 1, sha256: '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d', data: 'AA==' });
   const result = await target.importBackup(0, backup);
   assert.deepEqual(result.workspace, workspace);
   assert.deepEqual(await target.media('binary-1'), Buffer.from([0]));
