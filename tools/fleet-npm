@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 2 ] || [ "$1" != "ci" ] || [ "$2" != "--ignore-scripts" ]; then
+  echo "fleet-npm permits only: ci --ignore-scripts" >&2
+  exit 64
+fi
+
+exec npm ci --ignore-scripts
