@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url';
-import path from 'node:path';
 import readline from 'node:readline';
 import {
   createAsset, createMoment, createReference, createSelection, createTarget,
   exportCreativeDirection, updateReference
 } from './src/domain.js';
-import { FileWorkspaceStore, RevisionConflictError, StoreError } from './src/file-workspace-store.js';
+import { createPersistenceRepository } from './src/create-persistence-repository.js';
+import { PersistenceError, RevisionConflictError } from './src/persistence-errors.js';
 import { blobIdFromLocator } from './src/storage.js';
 import { normalizeCaptureRequest, publicCaptureResult } from './src/capture-request.js';
 import { captureReference as defaultCaptureReference } from './src/website-capture-service.js';
@@ -101,9 +100,9 @@ function result(value) {
 }
 
 function toolError(error) {
-  const code = error.mcpCode || error.code || (error instanceof TypeError ? 'INVALID_ARGUMENT' : error instanceof RangeError ? 'NOT_FOUND' : 'INTERNAL_ERROR');
-  const safe = error.mcpCode || error instanceof StoreError || error instanceof TypeError || error instanceof RangeError;
-  const value = { error: { code, message: safe ? error.message : 'The operation failed inside the local Refloom server', ...(safe && error.details ? { details: error.details } : {}) } };
+  const safe = Boolean(error.mcpCode) || error instanceof PersistenceError || error instanceof TypeError || error instanceof RangeError;
+  const code = safe ? (error.mcpCode || error.code || (error instanceof TypeError ? 'INVALID_ARGUMENT' : 'NOT_FOUND')) : 'INTERNAL_ERROR';
+  const value = { error: { code, message: safe ? error.message : 'The operation failed inside the local Refloom server', ...(safe && error.details !== undefined ? { details: error.details } : {}) } };
   return { ...result(value), isError: true };
 }
 
@@ -158,9 +157,21 @@ function mediaResource(asset) {
 }
 
 export function createMcpServer(options = {}) {
-  const store = options.store ?? new FileWorkspaceStore({ directory: options.dataDirectory ?? process.env.REFLOOM_DATA_DIR ?? path.resolve('data') });
+  const store = options.store ?? createPersistenceRepository({ env: options.env ?? process.env }).repository;
   const diagnostics = options.diagnostics ?? process.stderr;
   const captureReference = options.captureReference ?? defaultCaptureReference;
+  let initialization;
+  let closing;
+
+  function initialize() {
+    initialization ??= (async () => {
+      await store.initialize();
+      if (!await store.readiness()) throw new PersistenceError('Persistence repository is not ready', { code: 'PERSISTENCE_NOT_READY' });
+    })();
+    return initialization;
+  }
+
+  function close() { return closing ??= Promise.resolve().then(() => store.close()); }
 
   async function mutate(args, operation) {
     const current = await store.load();
@@ -267,7 +278,7 @@ export function createMcpServer(options = {}) {
         if (bytes.length > MAX_BINARY_BYTES || bytes.toString('base64') !== args.data) fail('INVALID_ARGUMENT', 'Binary data is invalid or too large');
         const mediaId = crypto.randomUUID();
         locator = `blob:${mediaId}`;
-        additions.push({ id: mediaId, data: args.data });
+        additions.push({ id: mediaId, data: args.data, type: args.mediaType, name: args.filename ?? '' });
       }
       const next = createAsset(value, { ...args, locator, provenance });
       const id = next.assets.at(-1).id;
@@ -300,6 +311,7 @@ export function createMcpServer(options = {}) {
   }
 
   async function handle(request) {
+    await initialize();
     const method = request.method;
     if (method === 'initialize') return { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: { listChanged: false }, resources: { subscribe: false, listChanged: false } }, serverInfo: { name: 'refloom', version: '0.1.0' }, instructions: 'Use list/search tools before detail tools. Mutations are additive-only. Media is available only through registered refloom://media resources.' };
     if (method === 'ping') return {};
@@ -307,7 +319,7 @@ export function createMcpServer(options = {}) {
     if (method === 'tools/call') {
       try { return result(await callTool(request.params?.name, request.params?.arguments)); }
       catch (error) {
-        if (!error.mcpCode && !(error instanceof StoreError) && !(error instanceof TypeError) && !(error instanceof RangeError)) diagnostics.write(`Refloom MCP internal tool error: ${error.name}\n`);
+        if (!error.mcpCode && !(error instanceof PersistenceError) && !(error instanceof TypeError) && !(error instanceof RangeError)) diagnostics.write(`Refloom MCP internal tool error: ${error?.name || 'Error'}\n`);
         return toolError(error);
       }
     }
@@ -333,7 +345,7 @@ export function createMcpServer(options = {}) {
     fail('METHOD_NOT_FOUND', `Unsupported method ${method}`);
   }
 
-  return { initialize: () => store.initialize(), handle };
+  return { initialize, handle, close };
 }
 
 export async function runStdio(options = {}) {
@@ -341,23 +353,33 @@ export async function runStdio(options = {}) {
   const output = options.output ?? process.stdout;
   const diagnostics = options.diagnostics ?? process.stderr;
   const server = createMcpServer(options);
-  await server.initialize();
-  const lines = readline.createInterface({ input, crlfDelay: Infinity });
-  for await (const line of lines) {
-    if (!line.trim()) continue;
-    if (Buffer.byteLength(line) > MAX_LINE_BYTES) { diagnostics.write('Refloom MCP: request exceeded line limit\n'); continue; }
-    let request;
-    try { request = JSON.parse(line); }
-    catch { diagnostics.write('Refloom MCP: ignored invalid JSON input\n'); continue; }
-    if (request.id === undefined) continue;
-    try { output.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, result: await server.handle(request) })}\n`); }
-    catch (error) {
-      const code = error.mcpCode === 'METHOD_NOT_FOUND' ? -32601 : error.mcpCode?.startsWith('INVALID_') ? -32602 : -32000;
-      output.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code, message: error.message, data: { code: error.mcpCode || error.code || 'INTERNAL_ERROR', ...(error instanceof RevisionConflictError ? { expected: error.expected, actual: error.actual } : {}) } } })}\n`);
+  try {
+    await server.initialize();
+    const lines = readline.createInterface({ input, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) {
+        if (!line.trim()) continue;
+        if (Buffer.byteLength(line) > MAX_LINE_BYTES) { diagnostics.write('Refloom MCP: request exceeded line limit\n'); continue; }
+        let request;
+        try { request = JSON.parse(line); }
+        catch { diagnostics.write('Refloom MCP: ignored invalid JSON input\n'); continue; }
+        if (request.id === undefined) continue;
+        try { output.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, result: await server.handle(request) })}\n`); }
+        catch (error) {
+          const typed = Boolean(error.mcpCode) || error instanceof PersistenceError || error instanceof TypeError || error instanceof RangeError;
+          const stableCode = typed ? (error.mcpCode || error.code || 'INVALID_ARGUMENT') : 'INTERNAL_ERROR';
+          const code = stableCode === 'METHOD_NOT_FOUND' ? -32601 : stableCode.startsWith('INVALID_') ? -32602 : -32000;
+          output.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code, message: typed ? error.message : 'The operation failed inside the local Refloom server', data: { code: stableCode, ...(typed && error.details !== undefined ? { details: error.details } : {}) } } })}\n`);
+        }
+      }
+    } finally {
+      lines.close();
     }
+  } finally {
+    await server.close();
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  runStdio().catch(error => { process.stderr.write(`Refloom MCP failed: ${error.message}\n`); process.exitCode = 1; });
+if (import.meta.filename === process.argv[1]) {
+  runStdio().catch(() => { process.stderr.write('Refloom MCP failed to start\n'); process.exitCode = 1; });
 }

@@ -1,59 +1,63 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { createBoard, createProject, createReference, createTarget, createWorkspace } from '../src/domain.js';
-import { FileWorkspaceStore } from '../src/file-workspace-store.js';
-import { createMcpServer } from '../mcp-server.mjs';
+import { PersistenceError, RevisionConflictError } from '../src/persistence-errors.js';
+import { createMcpServer, runStdio } from '../mcp-server.mjs';
 
-async function fixture() {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'refloom-mcp-'));
-  const store = new FileWorkspaceStore({ directory });
-  await store.initialize();
+class MemoryRepository {
+  constructor(workspace = createWorkspace()) {
+    this.workspace = structuredClone(workspace);
+    this.revision = 1;
+    this.media = new Map();
+    this.calls = [];
+  }
+  async initialize() { this.calls.push('initialize'); }
+  async readiness() { this.calls.push('readiness'); return true; }
+  async load() { return { revision: this.revision, workspace: structuredClone(this.workspace) }; }
+  async commit(expected, workspace, additions = []) {
+    if (expected !== this.revision) throw new RevisionConflictError(expected, this.revision);
+    this.workspace = structuredClone(workspace);
+    for (const addition of additions) this.media.set(addition.id, Buffer.from(addition.data, 'base64'));
+    this.revision += 1;
+    return this.load();
+  }
+  async mediaInfo(id) {
+    const contents = this.media.get(id);
+    if (!contents) throw new PersistenceError('Media is missing', { code: 'PERSISTENCE_NOT_FOUND', details: { id } });
+    return { mediaType: 'image/png', contents };
+  }
+  async close() { this.calls.push('close'); }
+}
+
+function fixture() {
   let workspace = createProject(createWorkspace(), { id: 'project_one', title: 'Identity' });
   workspace = createReference(workspace, { id: 'reference_one', projectId: 'project_one', title: 'Opening titles' });
   workspace = createTarget(workspace, { id: 'target_one', referenceId: 'reference_one', kind: 'reference' });
   workspace = createBoard(workspace, { id: 'board_one', projectId: 'project_one', title: 'Direction' });
-  await store.commit(0, workspace);
-  return directory;
+  return new MemoryRepository(workspace);
 }
 
-function client(directory) {
-  const child = spawn(process.execPath, ['mcp-server.mjs'], {
-    cwd: path.resolve(import.meta.dirname, '..'), env: { ...process.env, REFLOOM_DATA_DIR: directory },
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
+function client(store) {
+  const server = createMcpServer({ store, diagnostics: { write() {} } });
   let nextId = 1;
-  let stdout = '';
-  const pending = new Map();
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', chunk => {
-    stdout += chunk;
-    while (stdout.includes('\n')) {
-      const index = stdout.indexOf('\n');
-      const line = stdout.slice(0, index); stdout = stdout.slice(index + 1);
-      if (!line) continue;
-      const message = JSON.parse(line);
-      pending.get(message.id)?.(message);
-      pending.delete(message.id);
-    }
-  });
-  const request = (method, params) => new Promise((resolve, reject) => {
+  const request = async (method, params) => {
     const id = nextId++;
-    const timer = setTimeout(() => reject(new Error(`Timed out waiting for ${method}`)), 3000);
-    pending.set(id, message => { clearTimeout(timer); resolve(message); });
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) })}\n`);
-  });
-  return { child, request };
+    try { return { jsonrpc: '2.0', id, result: await server.handle({ id, method, ...(params ? { params } : {}) }) }; }
+    catch (error) {
+      return {
+        jsonrpc: '2.0', id,
+        error: { code: -32000, message: error.message, data: { code: error.mcpCode || error.code || 'INTERNAL_ERROR' } }
+      };
+    }
+  };
+  return { server, request };
 }
 
 test('stdio discovery, progressive reads, additive writes, media, errors, and revisions', async t => {
-  const directory = await fixture();
-  t.after(async () => rm(directory, { recursive: true, force: true }));
-  const mcp = client(directory);
-  t.after(() => mcp.child.kill());
+  const store = fixture();
+  const mcp = client(store);
+  t.after(() => mcp.server.close());
 
   const initialized = await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(initialized.result.serverInfo.name, 'refloom');
@@ -134,7 +138,7 @@ test('stdio discovery, progressive reads, additive writes, media, errors, and re
 });
 
 test('injected MCP capture returns structured results and bounded tool errors', async () => {
-  const store = { initialize: async () => {}, load: async () => ({ revision: 0, workspace: createWorkspace() }) };
+  const store = new MemoryRepository();
   let next = { status: 'partial', captured: [{ assetId: 'a', targetId: 't', momentId: 'm', mediaId: 'hidden' }] };
   const calls = [];
   const mcp = createMcpServer({ store, diagnostics: { write() {} }, captureReference: async (...args) => { calls.push(args); return next; } });
@@ -153,12 +157,11 @@ test('injected MCP capture returns structured results and bounded tool errors', 
   assert.equal(invalid.structuredContent.error.code, 'INVALID_ARGUMENT');
 });
 
-test('two stdio servers cannot silently overwrite the same revision', async t => {
-  const directory = await fixture();
-  t.after(async () => rm(directory, { recursive: true, force: true }));
-  const first = client(directory);
-  const second = client(directory);
-  t.after(() => { first.child.kill(); second.child.kill(); });
+test('two MCP instances sharing one authoritative repository cannot silently overwrite', async t => {
+  const store = fixture();
+  const first = client(store);
+  const second = client(store);
+  t.after(() => Promise.all([first.server.close(), second.server.close()]));
   await Promise.all([first.request('initialize'), second.request('initialize')]);
   const calls = await Promise.all([
     first.request('tools/call', { name: 'create_reference', arguments: { projectId: 'project_one', title: 'A', expectedRevision: 1 } }),
@@ -167,4 +170,40 @@ test('two stdio servers cannot silently overwrite the same revision', async t =>
   assert.equal(calls.filter(item => item.result.isError).length, 1);
   assert.equal(calls.filter(item => !item.result.isError).length, 1);
   assert.equal(calls.find(item => item.result.isError).result.structuredContent.error.code, 'REVISION_CONFLICT');
+  assert.deepEqual(calls.find(item => item.result.isError).result.structuredContent.error.details, { expectedRevision: 1, actualRevision: 2 });
+});
+
+test('repository initialization and close each happen once', async () => {
+  const store = fixture();
+  const mcp = createMcpServer({ store });
+  await Promise.all([mcp.initialize(), mcp.initialize(), mcp.handle({ method: 'ping' })]);
+  await Promise.all([mcp.close(), mcp.close()]);
+  assert.equal(store.calls.filter(value => value === 'initialize').length, 1);
+  assert.equal(store.calls.filter(value => value === 'readiness').length, 1);
+  assert.equal(store.calls.filter(value => value === 'close').length, 1);
+});
+
+test('unknown tool infrastructure errors and startup diagnostics redact secrets and URLs', async () => {
+  const secret = 'postgres://user:password@example.invalid/database';
+  const diagnostics = [];
+  const store = fixture();
+  store.load = async () => { throw new Error(secret); };
+  const mcp = createMcpServer({ store, diagnostics: { write: value => diagnostics.push(value) } });
+  const response = await mcp.handle({ method: 'tools/call', params: { name: 'list_projects', arguments: {} } });
+  assert.equal(response.structuredContent.error.code, 'INTERNAL_ERROR');
+  assert.doesNotMatch(JSON.stringify(response), /password|postgres:/);
+  assert.doesNotMatch(diagnostics.join(''), /password|postgres:/);
+});
+
+test('runStdio initializes before serving and closes on EOF', async () => {
+  const store = fixture();
+  const input = new PassThrough();
+  const output = new PassThrough();
+  let text = '';
+  output.setEncoding('utf8');
+  output.on('data', chunk => { text += chunk; });
+  input.end(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })}\n`);
+  await runStdio({ store, input, output, diagnostics: { write() {} } });
+  assert.deepEqual(JSON.parse(text), { jsonrpc: '2.0', id: 1, result: {} });
+  assert.deepEqual(store.calls, ['initialize', 'readiness', 'close']);
 });
