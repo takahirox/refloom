@@ -23,7 +23,7 @@ network:
   ports: [443]
 install:
   ecosystems: ["node_project"]
-  existing_lock: "deny"
+  existing_lock: "allow"
   new_dependency: "approval"
   manifest_lock_mutation: "approval"
   lifecycle_scripts: "deny"
@@ -46,5 +46,5 @@ budgets:
   wall_seconds: 1800.0
   worker_turns: 12
   processes: 40
-  download_bytes: 0
+  download_bytes: 50000000
   artifact_bytes: 100000000
