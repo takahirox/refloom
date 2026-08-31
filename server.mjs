@@ -3,7 +3,8 @@ import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FileWorkspaceStore, RevisionConflictError, StoreError } from './src/file-workspace-store.js';
+import { createPersistenceRepository } from './src/create-persistence-repository.js';
+import { PersistenceError } from './src/persistence-errors.js';
 import { normalizeCaptureRequest, publicCaptureResult } from './src/capture-request.js';
 import { captureReference as defaultCaptureReference } from './src/website-capture-service.js';
 
@@ -34,18 +35,18 @@ function send(response, status, body, headers = {}) {
 function json(response, status, value) { send(response, status, JSON.stringify(value), { 'Content-Type': 'application/json; charset=utf-8' }); }
 
 async function body(request, maximum = MAX_BODY) {
-  if (!(request.headers['content-type'] || '').toLowerCase().startsWith('application/json')) throw new StoreError('JSON_REQUIRED', 'Mutation requests require application/json');
+  if (!(request.headers['content-type'] || '').toLowerCase().startsWith('application/json')) throw new PersistenceError('Mutation requests require application/json', { code: 'JSON_REQUIRED' });
   const declared = Number(request.headers['content-length']);
-  if (Number.isFinite(declared) && declared > maximum) throw new StoreError('BODY_TOO_LARGE', 'Request body is too large');
+  if (Number.isFinite(declared) && declared > maximum) throw new PersistenceError('Request body is too large', { code: 'BODY_TOO_LARGE' });
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > maximum) throw new StoreError('BODY_TOO_LARGE', 'Request body is too large');
+    if (size > maximum) throw new PersistenceError('Request body is too large', { code: 'BODY_TOO_LARGE' });
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-  catch { throw new StoreError('INVALID_JSON', 'Request body is not valid JSON'); }
+  catch { throw new PersistenceError('Request body is not valid JSON', { code: 'INVALID_JSON' }); }
 }
 
 function trustedRequest(request) {
@@ -115,12 +116,55 @@ async function openStream(filename) {
   return stream;
 }
 
+function apiFailure(error) {
+  const statuses = {
+    REVISION_CONFLICT: 409,
+    PERSISTENCE_NOT_FOUND: 404,
+    BODY_TOO_LARGE: 413,
+    JSON_REQUIRED: 415,
+    INVALID_JSON: 400
+  };
+  const status = statuses[error?.code] ?? (error instanceof TypeError ? 400 : 500);
+  const headers = error?.code === 'BODY_TOO_LARGE' ? { Connection: 'close' } : {};
+  const value = status < 500
+    ? { error: error.message, code: error.code ?? 'INVALID_REQUEST' }
+    : { error: 'The local operation failed', code: 'INTERNAL_ERROR' };
+  return { status, headers, value };
+}
+
 export function createRefloomServer(options = {}) {
   const repositoryRoot = path.resolve(options.root ?? import.meta.dirname);
-  const store = options.store ?? new FileWorkspaceStore({ directory: options.dataDirectory ?? path.join(repositoryRoot, 'data') });
+  const persistence = options.store === undefined
+    ? createPersistenceRepository({ env: options.env ?? process.env })
+    : { repository: options.store, cleanupIntervalMs: options.cleanupIntervalMs ?? 3_600_000 };
+  const store = persistence.repository;
   const captureReference = options.captureReference ?? defaultCaptureReference;
-  let initialized;
-  return createServer(async (request, response) => {
+  const scheduler = options.scheduler ?? globalThis;
+  let initializationState = 'initializing';
+  let cleanupTimer;
+  let cleanupRunning = false;
+  let repositoryClose;
+
+  const cleanup = async () => {
+    if (cleanupRunning || initializationState !== 'ready') return;
+    cleanupRunning = true;
+    try { await store.cleanupMedia(); }
+    catch { /* Cleanup is best effort and does not affect readiness. */ }
+    finally { cleanupRunning = false; }
+  };
+
+  const initialization = Promise.resolve().then(() => store.initialize()).then(async value => {
+    initializationState = 'ready';
+    await cleanup();
+    cleanupTimer = scheduler.setInterval(cleanup, persistence.cleanupIntervalMs);
+    return value;
+  }, error => {
+    initializationState = 'failed';
+    throw error;
+  });
+  initialization.catch(() => {});
+
+  const server = createServer(async (request, response) => {
     response.on('error', () => {});
 
     if (!trustedRequest(request)) { send(response, 403, 'Forbidden'); return; }
@@ -129,16 +173,28 @@ export function createRefloomServer(options = {}) {
     try { url = new URL(request.url ?? '/', 'http://localhost'); }
     catch { send(response, 400, 'Bad request'); return; }
 
+    if (url.pathname === '/healthz') {
+      json(response, 200, { status: 'live' });
+      return;
+    }
+
+    if (url.pathname === '/readyz') {
+      if (initializationState !== 'ready') { json(response, 503, { error: 'The local service is unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
+      try { await store.readiness(); json(response, 200, { status: 'ready' }); }
+      catch { json(response, 503, { error: 'The local service is unavailable', code: 'SERVICE_UNAVAILABLE' }); }
+      return;
+    }
+
     if (url.pathname.startsWith('/api/')) {
+      if (initializationState !== 'ready') {
+        json(response, 503, { error: 'The local service is unavailable', code: 'SERVICE_UNAVAILABLE' });
+        return;
+      }
       try {
-        initialized ??= store.initialize();
-        await initialized;
         await api(request, response, url.pathname, store, captureReference);
       } catch (error) {
-        const status = error instanceof RevisionConflictError ? 409 : error.code === 'BODY_TOO_LARGE' ? 413 : error.code === 'JSON_REQUIRED' ? 415 : error instanceof StoreError || error instanceof TypeError ? 400 : 500;
-        const headers = error.code === 'BODY_TOO_LARGE' ? { Connection: 'close' } : {};
-        const safe = status < 500 ? error.message : 'The local operation failed';
-        send(response, status, JSON.stringify({ error: safe, code: error.code || (status < 500 ? 'INVALID_REQUEST' : 'INTERNAL_ERROR') }), { 'Content-Type': 'application/json; charset=utf-8', ...headers });
+        const failure = apiFailure(error);
+        send(response, failure.status, JSON.stringify(failure.value), { 'Content-Type': 'application/json; charset=utf-8', ...failure.headers });
       }
       return;
     }
@@ -201,6 +257,18 @@ export function createRefloomServer(options = {}) {
     response.writeHead(200, headers);
     stream.pipe(response);
   });
+
+  Object.defineProperties(server, {
+    initialization: { value: initialization },
+    initializationState: { get: () => initializationState },
+    repositoryClosed: { get: () => repositoryClose }
+  });
+  server.once('close', () => {
+    if (cleanupTimer !== undefined) scheduler.clearInterval(cleanupTimer);
+    repositoryClose ??= Promise.resolve().then(() => store.close());
+    repositoryClose.catch(() => {});
+  });
+  return server;
 }
 
 export function startRefloomServer(options = {}) {
@@ -208,9 +276,14 @@ export function startRefloomServer(options = {}) {
   const port = Number(options.port ?? process.env.PORT ?? 4173);
   const host = options.host ?? '127.0.0.1';
 
-  server.once('error', error => {
-    console.error(`Refloom could not start on http://${host}:${port}: ${error.message}`);
+  server.once('error', () => {
+    console.error('Refloom could not start');
     process.exitCode = 1;
+  });
+  server.initialization.catch(() => {
+    console.error('Refloom persistence initialization failed');
+    process.exitCode = 1;
+    server.close();
   });
   server.listen(port, host, () => {
     const address = server.address();
