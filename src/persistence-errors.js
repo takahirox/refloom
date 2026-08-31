@@ -45,3 +45,13 @@ export class MigrationChecksumError extends MigrationError {
     this.code = 'MIGRATION_CHECKSUM_MISMATCH';
   }
 }
+
+export class MediaPersistenceError extends PersistenceError {
+  constructor(code, message, details, options = {}) {
+    super(message, { code, details, cause: options.cause });
+  }
+
+  static service(operation, details, cause) {
+    return new MediaPersistenceError('MEDIA_SERVICE_ERROR', `S3 ${operation} failed`, details, { cause });
+  }
+}
