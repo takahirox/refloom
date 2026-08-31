@@ -3,7 +3,7 @@ import {
   createTarget, deleteProject, deleteReference, exportBoardMarkdown, exportCreativeDirection,
   recordSignal, removeFromBoard, reorderBoard, updateProject, updateReference
 } from './domain.js';
-import { BLOB_PREFIX, RevisionConflictError, WorkspaceRepository, blobIdFromLocator, isEmptyWorkspace, readLegacyMigration } from './storage.js';
+import { BLOB_PREFIX, RevisionConflictError, WorkspaceRepository, blobIdFromLocator } from './storage.js';
 import { displayReference, formatMoment, formatSignal, safeFilename } from './ui-format.js';
 
 const $ = selector => document.querySelector(selector);
@@ -24,7 +24,7 @@ function storeProject(value) {
     if (value) globalThis.localStorage?.setItem('refloom.project', value);
     else globalThis.localStorage?.removeItem('refloom.project');
   } catch {
-    // Project selection is a convenience only; the localhost file store is authoritative.
+    // Project selection is a convenience only; shared workspace storage is authoritative.
   }
 }
 
@@ -352,8 +352,8 @@ function bindEvents() {
   $('#export-json').addEventListener('click', () => exportBoard('json')); $('#export-markdown').addEventListener('click', () => exportBoard('markdown'));
   $('#backup').addEventListener('click', async () => { try { download('refloom-workspace-backup.json', await repository.exportBackup(workspace), 'application/json'); announce('Workspace backup downloaded'); } catch (error) { announce(error.message, true); } });
   $('#restore-file').addEventListener('change', async event => { try { if (!await confirmAction('Replace the current workspace with this backup?')) return; workspace = await repository.importBackup(await event.target.files[0].text()); projectId = workspace.projects[0]?.id; location.hash = 'library'; await render(); announce('Workspace restored'); } catch (error) { announce(`Import failed: ${error.message}`, true); } finally { event.target.value = ''; } });
-  $('#delete-project').addEventListener('click', async () => { const project = activeProject(); if (!project || !await confirmAction(`Delete project “${project.title}” and all of its local data?`)) return; const next = deleteProject(workspace, project.id); projectId = next.projects[0]?.id; await commit(next, [], 'Project deleted'); });
-  $('#reset').addEventListener('click', async () => { if (!await confirmAction('Permanently reset every project, reference, binary, board, and activity record on this device?')) return; workspace = await repository.reset(); projectId = undefined; storeProject(); location.hash = 'library'; await render(); announce('All local Refloom data was reset'); });
+  $('#delete-project').addEventListener('click', async () => { const project = activeProject(); if (!project || !await confirmAction(`Delete project “${project.title}” and all of its workspace data?`)) return; const next = deleteProject(workspace, project.id); projectId = next.projects[0]?.id; await commit(next, [], 'Project deleted'); });
+  $('#reset').addEventListener('click', async () => { if (!await confirmAction('Permanently reset every project, reference, binary, board, and activity record in the shared workspace? This affects every client using it.')) return; workspace = await repository.reset(); projectId = undefined; storeProject(); location.hash = 'library'; await render(); announce('The shared Refloom workspace was reset'); });
 }
 
 async function start() {
@@ -361,14 +361,6 @@ async function start() {
   try {
     await repository.open();
     workspace = await repository.load();
-    if (isEmptyWorkspace(workspace)) {
-      const legacy = await readLegacyMigration();
-      if (legacy && await confirmAction('Refloom found workspace data from the previous browser-only version. Copy it into the local companion now? The legacy copy will be kept for recovery.')) {
-        await repository.mutate(legacy.workspace, legacy.binaries);
-        workspace = legacy.workspace;
-        announce('Legacy workspace copied; the original browser copy was preserved');
-      }
-    }
     await render();
   }
   catch (error) { $('#fatal').hidden = false; $('#fatal').textContent = error.message; for (const control of document.querySelectorAll('button,input,select,textarea')) control.disabled = true; }
