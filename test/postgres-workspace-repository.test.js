@@ -93,6 +93,26 @@ test('load reconstructs all fixed row sets and preserves board position query', 
   assert.ok(selects.every(item => item.values === undefined));
   assert.equal(selects[7].text,
     'select * from board_selections order by board_id, position');
+  assert.equal(pool.queries[0].text, 'begin isolation level repeatable read read only');
+  assert.equal(pool.queries.at(-1).text, 'commit');
+  assert.ok(pool.queries.every(item => item.client));
+  assert.equal(pool.released, true);
+});
+
+test('load rolls back and releases a failed snapshot', async () => {
+  const pool = new FakePool(text => {
+    if (text.startsWith('select revision')) throw new Error('database secret');
+    return { rows: [] };
+  });
+  await assert.rejects(new PostgresWorkspaceRepository({
+    pool, mediaStore: new FakeMediaStore()
+  }).load(), error => {
+    assert.equal(error.message, 'PostgreSQL workspace load failed');
+    assert.equal(error.message.includes('secret'), false);
+    return true;
+  });
+  assert.equal(pool.queries.at(-1).text, 'rollback');
+  assert.equal(pool.released, true);
 });
 
 function commitPool({ actual = 0, failDelete = false, retained = [] } = {}) {

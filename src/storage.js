@@ -123,7 +123,8 @@ export function decodeBackup(text) {
   const binaries = [];
   let total = 0;
   for (const file of value.binaries) {
-    if (!file || Object.keys(file).length !== BINARY_KEYS.length || !BINARY_KEYS.every((key, index) => Object.keys(file)[index] === key)) throw new TypeError('Backup contains corrupt binary record keys');
+    const keys = file && Object.keys(file);
+    if (!keys || keys.length !== BINARY_KEYS.length || !BINARY_KEYS.every(key => keys.includes(key))) throw new TypeError('Backup contains corrupt binary record keys');
     const record = binaryRecord(file);
     if (seen.has(record.id)) throw new TypeError(`Backup binary ${record.id} is duplicated`);
     seen.add(record.id);

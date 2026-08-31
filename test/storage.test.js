@@ -81,8 +81,6 @@ test('backup decoder validates exact records, correspondence, size, and digest',
   assert.throws(() => decodeBackup(envelope([{ ...zero, extra: true }])), /keys/i);
   const { name, ...missingName } = zero;
   assert.throws(() => decodeBackup(envelope([missingName])), /keys/i);
-  const wrongOrder = { type: zero.type, id: zero.id, name: zero.name, size: zero.size, sha256: zero.sha256, data: zero.data };
-  assert.throws(() => decodeBackup(envelope([wrongOrder])), /keys/i);
 });
 
 test('backup decoder returns sorted cloned data', () => {
@@ -95,6 +93,23 @@ test('backup decoder returns sorted cloned data', () => {
   backup.binaries[0].name = 'mutated';
   assert.equal(workspace.projects[0].title, 'Test');
   assert.equal(other.name, 'one.png');
+});
+
+test('backup decoder treats JSON object key order as insignificant', () => {
+  const workspace = workspaceWithBlob();
+  const original = JSON.parse(encodeBackup(workspace, [{
+    id: 'binary-1', type: 'image/png', name: 'one.png', data: 'AA=='
+  }]));
+  const binary = original.binaries[0];
+  original.binaries[0] = {
+    data: binary.data,
+    sha256: binary.sha256,
+    size: binary.size,
+    name: binary.name,
+    type: binary.type,
+    id: binary.id
+  };
+  assert.deepEqual(decodeBackup(JSON.stringify(original)).workspace, workspace);
 });
 
 test('WorkspaceRepository loads and mutates through the same-origin HTTP adapter', async () => {

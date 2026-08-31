@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -67,7 +67,8 @@ function safeFailure(operation, error, details = {}) {
 
 export class S3MediaStore {
   constructor({ client, bucket, limits, cleanupLimit = DEFAULT_CLEANUP_LIMIT,
-    orphanGraceMs = DEFAULT_ORPHAN_GRACE_MS, now = () => Date.now() } = {}) {
+    orphanGraceMs = DEFAULT_ORPHAN_GRACE_MS, now = () => Date.now(),
+    readinessId = () => `readiness_${randomUUID().replaceAll('-', '_')}` } = {}) {
     if (!client || typeof client.send !== 'function') throw new TypeError('S3 client must provide send()');
     if (typeof bucket !== 'string' || !bucket) throw new TypeError('S3 bucket is required');
     this.client = client;
@@ -76,11 +77,45 @@ export class S3MediaStore {
     this.cleanupLimit = cleanupLimit;
     this.orphanGraceMs = orphanGraceMs;
     this.now = now;
+    this.readinessId = readinessId;
+    this.readinessVerified = false;
   }
 
   async readiness() {
     try {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+      if (this.readinessVerified) return true;
+      const id = validId(this.readinessId());
+      const item = {
+        id,
+        key: keyFor(id),
+        contents: Buffer.alloc(0),
+        size: 0,
+        sha256: sha256(Buffer.alloc(0)),
+        mediaType: 'application/octet-stream',
+        name: ''
+      };
+      let created = false;
+      try {
+        await this.put(item);
+        created = true;
+        await this.get({ id, size: 0, sha256: item.sha256 });
+        const listed = await this.client.send(new ListObjectsV2Command({
+          Bucket: this.bucket, Prefix: item.key, MaxKeys: 1
+        }));
+        if (!(listed.Contents ?? []).some(object => object.Key === item.key)) {
+          throw new Error('Readiness object could not be listed');
+        }
+      } finally {
+        if (created) {
+          const deleted = await this.client.send(new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: { Objects: [{ Key: item.key }], Quiet: true }
+          }));
+          if (deleted.Errors?.length) throw new Error('Readiness object could not be deleted');
+        }
+      }
+      this.readinessVerified = true;
       return true;
     } catch (error) {
       throw safeFailure('readiness check', error);

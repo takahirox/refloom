@@ -155,11 +155,26 @@ test('reads through a bounded stream and verifies size and digest', async () => 
     error => error.code === 'MEDIA_VERIFICATION_FAILED');
 });
 
-test('checks bucket readiness and returns a typed secret-free failure', async () => {
-  const ready = new FakeClient([{}]);
-  assert.equal(await store(ready).readiness(), true);
-  assert.ok(ready.commands[0] instanceof HeadBucketCommand);
+test('checks all required bucket permissions once and returns a typed secret-free failure', async () => {
+  const ready = new FakeClient([
+    {}, notFound(), {},
+    { ContentLength: 0, Metadata: { sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' } },
+    { Body: Readable.from([]) },
+    { Contents: [{ Key: 'media/readiness_test' }] },
+    {}
+  ]);
+  const checked = store(ready, { readinessId: () => 'readiness_test' });
+  assert.equal(await checked.readiness(), true);
+  assert.deepEqual(ready.commands.map(command => command.constructor), [
+    HeadBucketCommand, HeadObjectCommand, PutObjectCommand, HeadObjectCommand,
+    GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand
+  ]);
   assert.deepEqual(ready.commands[0].input, { Bucket: 'private-bucket' });
+  assert.deepEqual(ready.commands[5].input, {
+    Bucket: 'private-bucket', Prefix: 'media/readiness_test', MaxKeys: 1
+  });
+  assert.equal(await checked.readiness(), true);
+  assert.ok(ready.commands.at(-1) instanceof HeadBucketCommand);
 
   const unavailable = new FakeClient([new Error('endpoint with secret')]);
   await assert.rejects(store(unavailable).readiness(), error => {

@@ -101,8 +101,22 @@ export class PostgresWorkspaceRepository extends PersistenceRepository {
   }
 
   async load() {
-    try { return await loaded(this.pool); }
-    catch (error) { safe(error, 'load'); }
+    let client;
+    let transaction = false;
+    try {
+      client = await this.pool.connect();
+      await client.query('begin isolation level repeatable read read only');
+      transaction = true;
+      const result = await loaded(client);
+      await client.query('commit');
+      transaction = false;
+      return result;
+    } catch (error) {
+      if (transaction) {
+        try { await client.query('rollback'); } catch {}
+      }
+      safe(error, 'load');
+    } finally { client?.release(); }
   }
 
   async commit(expectedRevision, workspace, additions = []) {
