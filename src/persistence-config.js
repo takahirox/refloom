@@ -40,6 +40,23 @@ function parseBoolean(value, variable) {
   throw new PersistenceConfigError(`${variable} must be exactly true or false`, { variable });
 }
 
+function parseInteger(value, variable, { defaultValue, minimum, maximum } = {}) {
+  if (value === undefined) return defaultValue;
+  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value)) {
+    throw new PersistenceConfigError(`${variable} must be a decimal integer`, { variable });
+  }
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < minimum) {
+    throw new PersistenceConfigError(`${variable} must be at least ${minimum}`, { variable });
+  }
+  if (maximum !== undefined && number > maximum) {
+    throw new PersistenceConfigError(
+      `${variable} must be between ${minimum} and ${maximum}`, { variable }
+    );
+  }
+  return number;
+}
+
 export function readPersistenceConfig(env = process.env) {
   for (const name of REQUIRED) required(env, name);
   const credentials = Object.freeze({
@@ -53,8 +70,17 @@ export function readPersistenceConfig(env = process.env) {
     forcePathStyle: parseBoolean(env.REFLOOM_S3_FORCE_PATH_STYLE, 'REFLOOM_S3_FORCE_PATH_STYLE'),
     credentials
   });
+  const media = Object.freeze({
+    orphanGraceMs: parseInteger(env.REFLOOM_MEDIA_ORPHAN_GRACE_MS,
+      'REFLOOM_MEDIA_ORPHAN_GRACE_MS', { defaultValue: 86400000, minimum: 0 }),
+    cleanupLimit: parseInteger(env.REFLOOM_MEDIA_CLEANUP_LIMIT,
+      'REFLOOM_MEDIA_CLEANUP_LIMIT', { defaultValue: 1000, minimum: 1, maximum: 1000 }),
+    cleanupIntervalMs: parseInteger(env.REFLOOM_MEDIA_CLEANUP_INTERVAL_MS,
+      'REFLOOM_MEDIA_CLEANUP_INTERVAL_MS', { defaultValue: 3600000, minimum: 1 })
+  });
   return Object.freeze({
     databaseUrl: parseUrl(required(env, 'DATABASE_URL'), 'DATABASE_URL', ['postgres:', 'postgresql:']),
-    s3
+    s3,
+    media
   });
 }

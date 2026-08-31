@@ -27,11 +27,17 @@ test('reads and recursively freezes required persistence configuration', () => {
       bucket: 'refloom',
       forcePathStyle: true,
       credentials: { accessKeyId: 'access', secretAccessKey: 'secret' }
+    },
+    media: {
+      orphanGraceMs: 86400000,
+      cleanupLimit: 1000,
+      cleanupIntervalMs: 3600000
     }
   });
   assert.equal(Object.isFrozen(config), true);
   assert.equal(Object.isFrozen(config.s3), true);
   assert.equal(Object.isFrozen(config.s3.credentials), true);
+  assert.equal(Object.isFrozen(config.media), true);
 });
 
 test('accepts only an exact explicit path-style boolean', () => {
@@ -62,6 +68,36 @@ test('reports each missing required variable and rejects unsafe URLs', () => {
     { REFLOOM_S3_ENDPOINT: 'ftp://objects.example' },
     { REFLOOM_S3_ENDPOINT: 'https://user:pass@objects.example' }
   ]) assert.throws(() => readPersistenceConfig({ ...valid(), ...patch }), PersistenceConfigError);
+});
+
+test('reads strict bounded media cleanup configuration', () => {
+  const config = readPersistenceConfig({
+    ...valid(),
+    REFLOOM_MEDIA_ORPHAN_GRACE_MS: '0',
+    REFLOOM_MEDIA_CLEANUP_LIMIT: '1',
+    REFLOOM_MEDIA_CLEANUP_INTERVAL_MS: '42'
+  });
+  assert.deepEqual(config.media, {
+    orphanGraceMs: 0,
+    cleanupLimit: 1,
+    cleanupIntervalMs: 42
+  });
+
+  for (const [variable, values] of Object.entries({
+    REFLOOM_MEDIA_ORPHAN_GRACE_MS: ['-1', '+1', '1.5', '01', '9007199254740992'],
+    REFLOOM_MEDIA_CLEANUP_LIMIT: ['0', '1001', '-1', '1e2', ''],
+    REFLOOM_MEDIA_CLEANUP_INTERVAL_MS: ['0', '-1', ' 1', 'Infinity']
+  })) {
+    for (const value of values) {
+      assert.throws(() => readPersistenceConfig({ ...valid(), [variable]: value }), (error) => {
+        assert.ok(error instanceof PersistenceConfigError);
+        assert.deepEqual(error.details, { variable });
+        assert.match(error.message, new RegExp(variable));
+        if (value !== '') assert.equal(error.message.includes(value), false);
+        return true;
+      });
+    }
+  }
 });
 
 test('persistence errors expose stable actionable codes, details, and causes', () => {
