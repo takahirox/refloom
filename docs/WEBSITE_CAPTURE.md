@@ -6,6 +6,35 @@ This is a bounded adapter around the local-first, non-AI core described in
 `PRODUCT_SPEC.md`; it does not make autonomous or unrestricted capture a
 product principle.
 
+## Runtime packaging and MCP
+
+The Compose app image installs Chromium and sets `REFLOOM_CHROME_PATH` to its
+container executable. This lets `docker compose exec -T app node mcp-server.mjs`
+use the same private PostgreSQL/S3 network and controlled-browser runtime as the
+HTTP application without publishing database or object-store ports.
+
+The app and integration containers run as the image's non-root `node` user with
+`no-new-privileges`. `config/chromium-seccomp.json` vendors Docker 29.1.3's
+default profile and adds exact-value allowances for only the Chromium sandbox
+namespace calls observed in this image: `clone` combinations for user/PID/network
+namespaces and `unshare(CLONE_NEWUSER)`. Chromium is not launched with
+`--no-sandbox`, and the profile retains Docker's default syscall and capability
+restrictions. Re-check the profile when changing the Chromium or Docker base
+version. Upstream provenance and the exact added rules are recorded in
+`config/README.md`.
+
+`npm run check:browser` launches the configured browser against `about:blank`,
+connects to its profile-published loopback CDP endpoint, requests the browser
+version, and cleans up the process and temporary profile. It never contacts an
+external website. The integration container runs this check before persistence
+tests.
+
+If the executable is missing or cannot establish CDP, the MCP tool still returns
+the generic `CAPTURE_FAILED` boundary error. A stable `BROWSER_UNAVAILABLE`,
+`BROWSER_START_FAILED`, or `CAPTURE_RUNTIME_FAILED` diagnostic is written only
+to stderr, without executable/profile paths or captured URLs. Host-process runs
+may set `REFLOOM_CHROME_PATH`; MCP callers cannot override it.
+
 ## Security invariants
 
 - Only fragment-free `http` URLs on port 80 and `https` URLs on port 443 are

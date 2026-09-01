@@ -9,6 +9,7 @@ import {
   createTarget, createWorkspace
 } from '../../src/domain.js';
 import { RevisionConflictError } from '../../src/persistence-errors.js';
+import { captureReference } from '../../src/website-capture-service.js';
 
 function repository() {
   return createPersistenceRepository({ env: process.env }).repository;
@@ -90,6 +91,55 @@ test('PostgreSQL and S3 are one authoritative path for repository, HTTP, and MCP
   });
   assert.deepEqual(Buffer.from(media.contents[0].blob, 'base64'), bytes);
 
+  const captureStore = repository();
+  const captureMcp = createMcpServer({
+    store: captureStore,
+    diagnostics: { write() {} },
+    captureReference: (store, referenceId, settings) => captureReference(
+      store, referenceId, settings, {
+        resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+        captureWebsite: async (sourceUrl, options) => {
+          assert.equal(sourceUrl, 'https://example.com/');
+          await options.onScreenshot({
+            png: Buffer.from('captured-checkpoint').toString('base64'),
+            originalUrl: sourceUrl,
+            finalUrl: sourceUrl,
+            title: 'Captured page',
+            domain: 'example.com',
+            capturedAt: '2026-09-01T00:00:00.000Z',
+            viewport: { width: options.width, height: options.height, deviceScaleFactor: 1 },
+            checkpoint: { index: 0, y: 0, count: 1 },
+            captureMethod: 'automated-browser',
+            captureStrategy: 'deterministic-scroll'
+          });
+          return { screenshots: [{}] };
+        }
+      }
+    )
+  });
+  t.after(() => captureMcp.close());
+  const captured = await captureMcp.handle({
+    method: 'tools/call', params: { name: 'request_website_capture', arguments: {
+      referenceId: 'reference_1', settings: { checkpoints: 1, width: 800, height: 600 }
+    } }
+  });
+  assert.equal(captured.structuredContent.status, 'complete');
+  assert.equal(captured.structuredContent.captured.length, 1);
+  const capturedIds = captured.structuredContent.captured[0];
+  const reference = await captureMcp.handle({
+    method: 'tools/call', params: { name: 'get_reference', arguments: {
+      referenceId: 'reference_1', limit: 100
+    } }
+  });
+  assert.ok(reference.structuredContent.assets.some(item => item.id === capturedIds.assetId));
+  assert.ok(reference.structuredContent.targets.some(item => item.id === capturedIds.targetId));
+  assert.ok(reference.structuredContent.moments.some(item => item.id === capturedIds.momentId));
+  const capturedAsset = reference.structuredContent.assets.find(item => item.id === capturedIds.assetId);
+  const capturedMedia = await captureMcp.handle({
+    method: 'resources/read', params: { uri: capturedAsset.resourceUri }
+  });
+  assert.deepEqual(Buffer.from(capturedMedia.contents[0].blob, 'base64'), Buffer.from('captured-checkpoint'));
+
   const httpStore = repository();
   const server = createRefloomServer({ store: httpStore });
   server.listen(0, '127.0.0.1');
@@ -105,7 +155,7 @@ test('PostgreSQL and S3 are one authoritative path for repository, HTTP, and MCP
   assert.equal(ready.status, 200);
   const response = await fetch(`${base}/api/workspace`);
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).revision, 2);
+  assert.equal((await response.json()).revision, 3);
   assert.equal((await fetch(`${base}/api/workspace`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ revision: 1, workspace: fixture(), binaries: [] })

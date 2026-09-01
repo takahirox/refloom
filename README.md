@@ -13,7 +13,8 @@ behavior are in [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md).
 - Docker Desktop with Docker Compose (recommended), or Node.js 22+, PostgreSQL,
   and a private S3-compatible object store
 - A current browser
-- Chrome or Chromium for optional automatic website capture
+- Chrome or Chromium for optional automatic website capture when running on the
+  host; the Compose app image includes Chromium
 
 ## Run and verify
 
@@ -24,6 +25,8 @@ docker compose up --build
 Open `http://127.0.0.1:4173`. The server binds only to localhost by default.
 PostgreSQL and object-store ports remain private inside the Compose network.
 The first startup creates the private bucket and applies checked SQL migrations.
+The app remains non-root with `no-new-privileges` and a checked-in seccomp
+profile that adds only the namespace calls required by Chromium's sandbox.
 
 For a host-process development run, install packages and set `DATABASE_URL`,
 `REFLOOM_S3_ENDPOINT`, `REFLOOM_S3_REGION`, `REFLOOM_S3_BUCKET`,
@@ -35,6 +38,7 @@ liveness and `GET /readyz` verifies migrations, PostgreSQL, and bucket access.
 npm test
 npm run test:integration
 npm run check
+npm run check:browser
 npm run mcp
 ```
 
@@ -48,16 +52,29 @@ revision and S3 media authority used by HTTP/capture and writes diagnostics only
 to stderr. Stop a manually started `npm run mcp` before asking Codex to launch
 its configured copy.
 
-Add the following to this repository's `.codex/config.toml` (create it if
-needed), replacing the two absolute paths. Refloom does not create or modify
-Codex configuration automatically:
+For the recommended Compose deployment, first run `docker compose up -d --build`.
+Then add the following to this repository's `.codex/config.toml` (create it if
+needed), replacing the absolute working directory. The MCP process runs inside
+the app container, where it shares the private PostgreSQL/S3 network and bundled
+Chromium. Refloom does not create or modify Codex configuration automatically:
+
+```toml
+[mcp_servers.refloom]
+command = "docker"
+args = ["compose", "exec", "-T", "app", "node", "mcp-server.mjs"]
+cwd = "/absolute/path/to/refloom"
+```
+
+For a host-process deployment, install Chrome or Chromium and use the following
+configuration instead. Set `REFLOOM_CHROME_PATH` when the executable is not in a
+standard platform location:
 
 ```toml
 [mcp_servers.refloom]
 command = "node"
 args = ["/absolute/path/to/refloom/mcp-server.mjs"]
 cwd = "/absolute/path/to/refloom"
-env = { DATABASE_URL = "postgresql://...", REFLOOM_S3_ENDPOINT = "http://...", REFLOOM_S3_REGION = "us-east-1", REFLOOM_S3_BUCKET = "refloom", REFLOOM_S3_ACCESS_KEY_ID = "...", REFLOOM_S3_SECRET_ACCESS_KEY = "...", REFLOOM_S3_FORCE_PATH_STYLE = "true" }
+env = { DATABASE_URL = "postgresql://...", REFLOOM_S3_ENDPOINT = "http://...", REFLOOM_S3_REGION = "us-east-1", REFLOOM_S3_BUCKET = "refloom", REFLOOM_S3_ACCESS_KEY_ID = "...", REFLOOM_S3_SECRET_ACCESS_KEY = "...", REFLOOM_S3_FORCE_PATH_STYLE = "true", REFLOOM_CHROME_PATH = "/absolute/path/to/chrome" }
 ```
 
 Restart Codex in the project and approve/trust the project configuration when
@@ -85,6 +102,11 @@ Captured binary media is exposed as `refloom://media/<opaque-id>` MCP resources.
 Only media currently referenced by a registered workspace asset can be read;
 filesystem paths and unregistered blobs are rejected. Resource MIME type and
 asset provenance are returned with the bytes.
+Run `docker compose exec -T app npm run check:browser` to verify the bundled
+browser and loopback CDP connection without contacting an external website.
+`BROWSER_UNAVAILABLE`, `BROWSER_START_FAILED`, and `CAPTURE_RUNTIME_FAILED`
+diagnostics are written only to MCP stderr; tool responses retain the stable,
+path-free `CAPTURE_FAILED` error.
 `npm run check` verifies required deliverables, JavaScript syntax, and safe
 rendering constraints.
 

@@ -141,7 +141,8 @@ test('injected MCP capture returns structured results and bounded tool errors', 
   const store = new MemoryRepository();
   let next = { status: 'partial', captured: [{ assetId: 'a', targetId: 't', momentId: 'm', mediaId: 'hidden' }] };
   const calls = [];
-  const mcp = createMcpServer({ store, diagnostics: { write() {} }, captureReference: async (...args) => { calls.push(args); return next; } });
+  const diagnostics = [];
+  const mcp = createMcpServer({ store, diagnostics: { write: value => diagnostics.push(value) }, captureReference: async (...args) => { calls.push(args); return next; } });
   const partial = await mcp.handle({ method: 'tools/call', params: { name: 'request_website_capture', arguments: { referenceId: 'r', settings: { width: 800 } } } });
   assert.deepEqual(partial.structuredContent, { status: 'partial', captured: [{ assetId: 'a', targetId: 't', momentId: 'm' }] });
   assert.equal(calls[0][1], 'r');
@@ -151,6 +152,13 @@ test('injected MCP capture returns structured results and bounded tool errors', 
   const busy = await mcp.handle({ method: 'tools/call', params: { name: 'request_website_capture', arguments: { referenceId: 'r' } } });
   assert.equal(busy.isError, true);
   assert.equal(busy.structuredContent.error.code, 'CAPTURE_BUSY');
+
+  next = { status: 'failed', captured: [], error: 'CAPTURE_FAILED', diagnostic: 'BROWSER_UNAVAILABLE' };
+  const unavailable = await mcp.handle({ method: 'tools/call', params: { name: 'request_website_capture', arguments: { referenceId: 'r' } } });
+  assert.equal(unavailable.isError, true);
+  assert.equal(unavailable.structuredContent.error.code, 'CAPTURE_FAILED');
+  assert.doesNotMatch(JSON.stringify(unavailable), /BROWSER_UNAVAILABLE/);
+  assert.equal(diagnostics.at(-1), 'Refloom MCP website capture diagnostic: BROWSER_UNAVAILABLE\n');
 
   const invalid = await mcp.handle({ method: 'tools/call', params: { name: 'request_website_capture', arguments: { referenceId: 'r', settings: { chromePath: '/tmp/chrome' } } } });
   assert.equal(invalid.isError, true);
