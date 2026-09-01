@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import readline from 'node:readline';
 import {
-  createAsset, createMoment, createReference, createSelection, createTarget,
+  createAsset, createMoment, createProject, createReference, createSelection, createTarget,
   exportCreativeDirection, updateReference
 } from './src/domain.js';
 import { createPersistenceRepository } from './src/create-persistence-repository.js';
@@ -33,6 +33,7 @@ const tools = [
   { name: 'search_selections', description: 'Locate paginated selections by project, aspect, intent, or related reference title.', inputSchema: objectSchema({ projectId: string('Project ID', 128), aspect: string('Case-insensitive aspect filter', MAX_QUERY), query: string('Case-insensitive aspect, intent, or reference-title query', MAX_QUERY), ...page }) },
   { name: 'get_selection', description: 'Get a selection with its target, moment, reference, and asset.', inputSchema: required(objectSchema({ selectionId: string('Selection ID', 128) }), 'selectionId') },
   { name: 'get_creative_direction', description: 'Get versioned creative-direction export for one board, or all boards in one project.', inputSchema: objectSchema({ boardId: string('Board ID', 128), projectId: string('Project ID', 128) }) },
+  { name: 'create_project', description: 'Add a project so an empty workspace can be bootstrapped.', inputSchema: required(objectSchema({ title: string('Title'), brief: string('Brief'), expectedRevision: { type: 'integer', minimum: 0 } }), 'title') },
   { name: 'create_reference', description: 'Add a reference and, for a saved website URL, queue one initial capture by default. Set capture to false to opt out.', inputSchema: required(objectSchema({ projectId: string('Project ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), captureMethod: string('Capture method', 128), capture: { type: 'boolean', description: 'Override the shared default for this creation' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'projectId') },
   { name: 'enrich_reference', description: 'Add or replace supplied descriptive fields on an existing reference; it never deletes the reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId') },
   { name: 'add_asset', description: 'Register a URL asset or add base64 image/video bytes to an existing reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), kind: { type: 'string', enum: ['url', 'image', 'video'] }, locator: string('Absolute http(s) URL for URL assets'), mediaType: string('MIME type', 255), filename: string('Original filename', 1024), data: string('Canonical base64 bytes for image/video assets', 36_000_000), provenance: { type: 'object' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId', 'kind') },
@@ -282,6 +283,10 @@ export function createMcpServer(options = {}) {
       entity(workspace, 'projects', args.projectId);
       return { revision, creativeDirections: workspace.boards.filter(board => board.projectId === args.projectId).map(board => exportCreativeDirection(workspace, board.id)) };
     }
+    if (name === 'create_project') return mutate(args, value => {
+      const next = createProject(value, args); const id = next.projects.at(-1).id;
+      return { workspace: next, entity: saved => entity(saved, 'projects', id) };
+    });
     if (name === 'create_reference') {
       let effectiveCapture;
       const created = await mutate(args, value => {
