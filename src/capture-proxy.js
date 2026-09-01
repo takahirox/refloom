@@ -38,10 +38,11 @@ export function createCaptureProxy(options = {}) {
   }
 
   function admit(socket) {
-    if (closed || ++opened > limits.connections) {
+    if (closed || sockets.size >= limits.connections) {
       socket.destroy();
       throw new Error(CAPTURE_ERROR);
     }
+    opened++;
     sockets.add(socket);
     socket.setTimeout?.(limits.idleMs, () => socket.destroy());
     socket.once?.('close', () => sockets.delete(socket));

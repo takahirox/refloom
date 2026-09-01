@@ -27,6 +27,11 @@ PostgreSQL and object-store ports remain private inside the Compose network.
 The first startup creates the private bucket and applies checked SQL migrations.
 The app remains non-root with `no-new-privileges` and a checked-in seccomp
 profile that adds only the namespace calls required by Chromium's sandbox.
+The image's bounded Node entrypoint starts Xvfb on the fixed container-local
+display `:99`, waits for its Unix socket, and forwards command signals. Its
+`1920x1080x24` screen has TCP listening disabled. The app, integration command,
+and `docker compose exec` MCP process therefore use the same X server while
+Chromium remains headless and sandboxed.
 
 For a host-process development run, install packages and set `DATABASE_URL`,
 `REFLOOM_S3_ENDPOINT`, `REFLOOM_S3_REGION`, `REFLOOM_S3_BUCKET`,
@@ -110,8 +115,9 @@ Only media currently referenced by a registered workspace asset can be read;
 filesystem paths and unregistered blobs are rejected. Resource MIME type and
 asset provenance are returned with the bytes.
 Run `docker compose exec -T app npm run check:browser` to verify the bundled
-browser and loopback CDP connection without contacting an external website.
-`BROWSER_UNAVAILABLE`, `BROWSER_START_FAILED`, and `CAPTURE_RUNTIME_FAILED`
+browser, loopback CDP connection, and WebGL capability without contacting an
+external website. `BROWSER_UNAVAILABLE`, `BROWSER_START_FAILED`,
+`WEBGL_UNAVAILABLE`, `PAGE_RUNTIME_ERROR`, and `CAPTURE_RUNTIME_FAILED`
 diagnostics are written only to MCP stderr; tool responses retain the stable,
 path-free `CAPTURE_FAILED` error.
 `npm run check` verifies required deliverables, JavaScript syntax, and safe

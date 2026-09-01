@@ -12,7 +12,8 @@ const KNOWN_CHROME = process.platform === 'darwin'
     : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
 
 const CAPTURE_DIAGNOSTICS = new Set([
-  'BROWSER_UNAVAILABLE', 'BROWSER_START_FAILED', 'CAPTURE_RUNTIME_FAILED'
+  'BROWSER_UNAVAILABLE', 'BROWSER_START_FAILED', 'CAPTURE_RUNTIME_FAILED',
+  'WEBGL_UNAVAILABLE', 'PAGE_RUNTIME_ERROR'
 ]);
 
 function diagnosticError(code, cause) {
@@ -45,6 +46,47 @@ async function bounded(promise, clock, ms) {
     ]);
   } finally {
     (clock.clearTimeout || globalThis.clearTimeout)(timer);
+  }
+}
+
+const WEBGL_CAPABILITY_EXPRESSION = `(() => {
+  const canvas = document.createElement('canvas');
+  return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+})()`;
+
+const PAGE_RUNTIME_HOOK = `(() => {
+  const state = { webGlContextFailure: false };
+  Object.defineProperty(globalThis, Symbol.for('refloom.pageRuntimeDiagnostic'), {
+    value: state
+  });
+  const original = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+    const isWebGl = type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl';
+    try {
+      const context = Reflect.apply(original, this, [type, ...args]);
+      if (isWebGl && context === null) state.webGlContextFailure = true;
+      return context;
+    } catch (error) {
+      if (isWebGl) state.webGlContextFailure = true;
+      throw error;
+    }
+  };
+})()`;
+
+const PAGE_RUNTIME_DIAGNOSTIC_EXPRESSION = `Boolean(
+  globalThis[Symbol.for('refloom.pageRuntimeDiagnostic')]?.webGlContextFailure
+)`;
+
+async function verifyWebGlCapability(cdp, clock, timeoutMs) {
+  try {
+    const available = await bounded(
+      cdp.evaluate(WEBGL_CAPABILITY_EXPRESSION),
+      clock,
+      timeoutMs
+    );
+    if (available !== true) throw new Error(CAPTURE_ERROR);
+  } catch (error) {
+    throw diagnosticError('WEBGL_UNAVAILABLE', error);
   }
 }
 
@@ -161,6 +203,7 @@ export async function verifyChromeRuntime(options = {}) {
       `--user-data-dir=${profile}`, '--remote-debugging-port=0',
       '--remote-debugging-address=127.0.0.1', '--headless=new',
       '--disable-dev-shm-usage', '--disable-background-networking',
+      '--use-gl=angle', '--use-angle=gl', '--ignore-gpu-blocklist',
       '--disable-sync', '--disable-extensions', '--no-first-run',
       '--no-default-browser-check', 'about:blank'
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -175,6 +218,7 @@ export async function verifyChromeRuntime(options = {}) {
     } catch (error) {
       throw diagnosticError('BROWSER_START_FAILED', error);
     }
+    await verifyWebGlCapability(cdp, clock, timeoutMs);
     return true;
   } catch (error) {
     throw diagnosticError(captureDiagnosticCode(error) || 'CAPTURE_RUNTIME_FAILED', error);
@@ -255,6 +299,7 @@ export async function captureWebsite(input, options = {}) {
       `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
       '--headless=new', '--hide-scrollbars', '--incognito', '--no-first-run',
       '--no-default-browser-check', '--disable-dev-shm-usage', '--disable-quic', '--disable-background-networking',
+      '--use-gl=angle', '--use-angle=gl', '--ignore-gpu-blocklist',
       '--disable-sync', '--disable-extensions', '--disable-component-update',
       '--disable-features=MediaRouter,WebRtcHideLocalIpsWithMdns',
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
@@ -275,6 +320,8 @@ export async function captureWebsite(input, options = {}) {
     active();
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: PAGE_RUNTIME_HOOK });
+    await verifyWebGlCapability(cdp, clock, checkpointMs);
     await cdp.send('Target.setDiscoverTargets', { discover: true });
     await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' });
     await cdp.send('Network.enable');
@@ -290,6 +337,13 @@ export async function captureWebsite(input, options = {}) {
     };
     cdp.on?.('Target.targetCreated', closePopup);
     cdp.on?.('Target.targetInfoChanged', closePopup);
+    const documentStatuses = new Map();
+    cdp.on?.('Network.responseReceived', event => {
+      if (event.type === 'Document' && typeof event.frameId === 'string' &&
+          Number.isFinite(event.response?.status)) {
+        documentStatuses.set(event.frameId, event.response.status);
+      }
+    });
     let redirects = 0;
     let rejectRedirects;
     const redirectLimit = new Promise((_, reject) => { rejectRedirects = reject; });
@@ -305,6 +359,12 @@ export async function captureWebsite(input, options = {}) {
     await bounded(Promise.race([loaded, redirectLimit]), clock, checkpointMs);
     await bounded(pause(clock, readinessMs), clock, readinessMs + 100);
     active();
+    const webGlContextFailure = await bounded(
+      cdp.evaluate(PAGE_RUNTIME_DIAGNOSTIC_EXPRESSION), clock, checkpointMs
+    );
+    if ((documentStatuses.get(navigation.frameId) ?? 0) >= 400 || webGlContextFailure === true) {
+      throw diagnosticError('PAGE_RUNTIME_ERROR');
+    }
     const metrics = await cdp.evaluate(`({
       title: document.title,
       url: location.href,

@@ -10,6 +10,15 @@ class FakeRequest extends EventEmitter {
   destroy() { this.emit('close'); }
 }
 
+function complete(request, statusCode = 204) {
+  const response = new EventEmitter();
+  response.statusCode = statusCode;
+  response.headers = {};
+  response.pipe = destination => destination.end();
+  request.emit('response', response);
+  request.emit('close');
+}
+
 test('pins the validated DNS address and strips proxy credentials', async t => {
   const seen = [];
   let resolution = 0;
@@ -69,4 +78,72 @@ test('rejects a mixed public and private DNS response before connecting', async 
   });
   assert.equal(status, 403);
   assert.equal(connected, false);
+});
+
+test('releases a connection slot when an admitted socket closes', async t => {
+  const upstreams = [];
+  const proxy = createCaptureProxy({
+    maxConnections: 1,
+    resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+    request() {
+      const upstream = new FakeRequest();
+      upstreams.push(upstream);
+      queueMicrotask(() => complete(upstream));
+      return upstream;
+    }
+  });
+  const address = await proxy.listen();
+  t.after(() => proxy.close());
+  const http = await import('node:http');
+  const send = () => new Promise((resolve, reject) => {
+    const request = http.request({
+      host: '127.0.0.1', port: address.port, path: 'http://example.com/'
+    }, response => {
+      response.resume();
+      response.once('end', () => resolve(response.statusCode));
+    });
+    request.once('error', reject);
+    request.end();
+  });
+
+  assert.equal(await send(), 204);
+  assert.equal(await send(), 204);
+  assert.equal(upstreams.length, 2);
+});
+
+test('rejects a connection while all slots are concurrently occupied', async t => {
+  const upstreams = [];
+  let notifyFirst;
+  const firstCreated = new Promise(resolve => { notifyFirst = resolve; });
+  const proxy = createCaptureProxy({
+    maxConnections: 1,
+    resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+    request() {
+      const upstream = new FakeRequest();
+      upstreams.push(upstream);
+      if (upstreams.length === 1) notifyFirst();
+      return upstream;
+    }
+  });
+  const address = await proxy.listen();
+  t.after(() => proxy.close());
+  const http = await import('node:http');
+  const send = () => new Promise((resolve, reject) => {
+    const request = http.request({
+      host: '127.0.0.1', port: address.port, path: 'http://example.com/'
+    }, response => {
+      response.resume();
+      response.once('end', () => resolve(response.statusCode));
+    });
+    request.once('error', reject);
+    request.end();
+  });
+
+  const first = send();
+  await firstCreated;
+  assert.equal(await send(), 403);
+  assert.equal(upstreams.length, 2);
+
+  complete(upstreams[0]);
+  assert.equal(await first, 204);
 });

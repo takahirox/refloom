@@ -108,9 +108,13 @@ Website capture is reference-first. Creating a website Reference through UI,
 HTTP, or MCP commits it before the default-on initial capture is queued. A
 visible per-create choice can override the shared Workspace default. HTTP and
 MCP use the same bounded scheduler and capture service, which reloads the stored
-source URL and commits each completed screenshot independently. Partial failure
-or cancellation cannot roll back the URL or earlier checkpoints. URL edits and
-later captures remain explicit.
+source URL and commits each completed screenshot independently. Container image
+commands run under a fixed `DISPLAY=:99` Xvfb server with a `1920x1080x24`
+screen and no TCP listener; application and Compose-exec MCP captures share that
+container-local display. Chromium remains headless and sandboxed, with an
+explicit ANGLE GL path whose WebGL capability is checked before navigation.
+Partial failure or cancellation cannot roll back the URL or earlier
+checkpoints. URL edits and later captures remain explicit.
 
 ## Versioning
 
