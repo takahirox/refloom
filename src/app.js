@@ -337,19 +337,34 @@ async function renderLibrary() {
         announce('Website capture cancellation requested');
       } catch (error) { announce(error.message, true); }
     });
-    const select = element('button', { type: 'button', className: 'primary', text: 'Select for board' });
+    const select = element('button', { type: 'button', className: 'primary card-primary', text: 'Select for board' });
     select.addEventListener('click', () => selectionEditor(reference));
     const remove = element('button', { type: 'button', className: 'danger', text: 'Delete' });
     remove.addEventListener('click', async () => {
       if (!await confirmAction(`Delete “${displayReference(reference)}” and all its assets and selections?`)) return;
       await commit(deleteReference(workspace, reference.id), [], 'Reference deleted');
     });
+    const morePanel = element('div', { className: 'more-panel', id: `more-${reference.id}` }, [add, websiteCapture, remove]);
+    morePanel.hidden = true;
+    const moreToggle = element('button', { type: 'button', className: 'more-toggle', 'aria-expanded': 'false', 'aria-controls': morePanel.id, text: 'More' });
+    moreToggle.addEventListener('click', () => {
+      const expanded = morePanel.hidden;
+      morePanel.hidden = !expanded;
+      moreToggle.setAttribute('aria-expanded', String(expanded));
+    });
     const card = element('article', { className: 'reference-card' }, [
-      await mediaPreview(previewAsset), element('h2', { text: displayReference(reference) }),
-      element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
-      captureStatus,
-      reference.notes ? element('p', { text: reference.notes }) : null,
-      element('div', { className: 'actions' }, [visitWebsite, edit, add, websiteCapture, cancelCapture, select, remove])
+      element('div', { className: 'card-media' }, [await mediaPreview(previewAsset)]),
+      element('div', { className: 'card-body' }, [
+        element('h2', { className: 'card-title', text: displayReference(reference) }),
+        element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
+        captureStatus,
+        reference.notes ? element('p', { className: 'card-note', text: reference.notes }) : null
+      ]),
+      element('div', { className: 'card-actions' }, [
+        select,
+        element('div', { className: 'actions' }, [visitWebsite, edit, cancelCapture]),
+        element('div', { className: 'card-more' }, [moreToggle, morePanel])
+      ])
     ]);
     cards.push(card);
   }
