@@ -11,12 +11,29 @@ const KNOWN_CHROME = process.platform === 'darwin'
     ? ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe']
     : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
 
+const CAPTURE_DIAGNOSTICS = new Set([
+  'BROWSER_UNAVAILABLE', 'BROWSER_START_FAILED', 'CAPTURE_RUNTIME_FAILED'
+]);
+
+function diagnosticError(code, cause) {
+  const error = new Error(CAPTURE_ERROR, cause ? { cause } : undefined);
+  Object.defineProperty(error, 'captureDiagnosticCode', { value: code });
+  return error;
+}
+
+export function captureDiagnosticCode(error) {
+  for (let current = error, depth = 0; current && depth < 8; current = current.cause, depth += 1) {
+    if (CAPTURE_DIAGNOSTICS.has(current.captureDiagnosticCode)) return current.captureDiagnosticCode;
+  }
+  return undefined;
+}
+
 export async function findChrome(explicit, fsAccess = access) {
   for (const candidate of [explicit, process.env.REFLOOM_CHROME_PATH, ...KNOWN_CHROME]) {
     if (!candidate) continue;
     try { await fsAccess(candidate); return candidate; } catch { /* continue */ }
   }
-  throw new Error(CAPTURE_ERROR);
+  throw diagnosticError('BROWSER_UNAVAILABLE');
 }
 
 async function bounded(promise, clock, ms) {
@@ -128,6 +145,49 @@ export async function connectChromeCdp(_browser, options = {}) {
   };
 }
 
+export async function verifyChromeRuntime(options = {}) {
+  const clock = options.clock || globalThis;
+  const fs = options.fs || { mkdtemp, rm, access };
+  const processSpawn = options.spawn || spawn;
+  const connectCdp = options.connectCdp || connectChromeCdp;
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  let profile;
+  let browser;
+  let cdp;
+  try {
+    const executable = await findChrome(options.executable, fs.access);
+    profile = await fs.mkdtemp(path.join(options.tmpdir || tmpdir(), 'refloom-browser-check-'));
+    browser = processSpawn(executable, [
+      `--user-data-dir=${profile}`, '--remote-debugging-port=0',
+      '--remote-debugging-address=127.0.0.1', '--headless=new',
+      '--disable-dev-shm-usage', '--disable-background-networking',
+      '--disable-sync', '--disable-extensions', '--no-first-run',
+      '--no-default-browser-check', 'about:blank'
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    browser.once?.('error', () => {});
+    for (const stream of [browser.stdout, browser.stderr]) {
+      stream?.on?.('error', () => {});
+      stream?.resume?.();
+    }
+    try {
+      cdp = await bounded(connectCdp(browser, { clock, profile }), clock, timeoutMs);
+      await bounded(cdp.send('Browser.getVersion'), clock, timeoutMs);
+    } catch (error) {
+      throw diagnosticError('BROWSER_START_FAILED', error);
+    }
+    return true;
+  } catch (error) {
+    throw diagnosticError(captureDiagnosticCode(error) || 'CAPTURE_RUNTIME_FAILED', error);
+  } finally {
+    try { await cdp?.close?.(); } catch { /* cleanup */ }
+    try { browser?.kill?.('SIGKILL'); } catch { /* cleanup */ }
+    if (browser?.pid && browser.exitCode === null) {
+      try { await bounded(new Promise(resolve => browser.once('exit', resolve)), clock, 1_000); } catch { /* cleanup */ }
+    }
+    if (profile) try { await fs.rm(profile, { recursive: true, force: true }); } catch { /* cleanup */ }
+  }
+}
+
 export function validateCaptureSettings(options = {}) {
   const values = {
     settleMs: options.settleMs ?? 500,
@@ -188,7 +248,7 @@ export async function captureWebsite(input, options = {}) {
     const args = [
       `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
       '--headless=new', '--hide-scrollbars', '--incognito', '--no-first-run',
-      '--no-default-browser-check', '--disable-quic', '--disable-background-networking',
+      '--no-default-browser-check', '--disable-dev-shm-usage', '--disable-quic', '--disable-background-networking',
       '--disable-sync', '--disable-extensions', '--disable-component-update',
       '--disable-features=MediaRouter,WebRtcHideLocalIpsWithMdns',
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
@@ -196,11 +256,16 @@ export async function captureWebsite(input, options = {}) {
       '--proxy-bypass-list=<-loopback>', 'about:blank'
     ];
     browser = processSpawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    browser.once?.('error', () => {});
     for (const stream of [browser.stdout, browser.stderr]) {
       stream?.on?.('error', () => {});
       stream?.resume?.();
     }
-    cdp = await bounded(connectCdp(browser, { clock, profile }), clock, checkpointMs);
+    try {
+      cdp = await bounded(connectCdp(browser, { clock, profile }), clock, checkpointMs);
+    } catch (error) {
+      throw diagnosticError('BROWSER_START_FAILED', error);
+    }
     active();
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
@@ -274,8 +339,8 @@ export async function captureWebsite(input, options = {}) {
 
   try {
     return await bounded(work, clock, overallMs);
-  } catch {
-    throw new Error(CAPTURE_ERROR);
+  } catch (error) {
+    throw diagnosticError(captureDiagnosticCode(error) || 'CAPTURE_RUNTIME_FAILED', error);
   } finally {
     cancelled = true;
     await cleanup();

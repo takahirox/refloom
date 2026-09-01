@@ -1,6 +1,8 @@
 import { createAsset, createMoment, createTarget } from './domain.js';
 import { RevisionConflictError } from './persistence-errors.js';
-import { captureWebsite, validateCaptureSettings } from './chrome-capture.js';
+import {
+  captureDiagnosticCode, captureWebsite, validateCaptureSettings
+} from './chrome-capture.js';
 import { normalizeCaptureUrl } from './capture-url.js';
 
 const activeStores = new WeakMap();
@@ -11,10 +13,11 @@ const ERROR = Object.freeze({
   FAILED: 'CAPTURE_FAILED'
 });
 
-const failed = (error, captured = []) => ({
+const failed = (error, captured = [], diagnostic) => ({
   status: captured.length ? 'partial' : 'failed',
   captured,
-  error
+  error,
+  ...(diagnostic ? { diagnostic } : {})
 });
 
 function ids(randomUUID) {
@@ -108,8 +111,8 @@ export async function captureReference(store, referenceId, settings = {}, depend
       }
     });
     return { status: 'complete', captured, summary };
-  } catch {
-    return failed(ERROR.FAILED, captured);
+  } catch (error) {
+    return failed(ERROR.FAILED, captured, captureDiagnosticCode(error));
   } finally {
     activeReferences.delete(referenceId);
     if (!activeReferences.size) activeStores.delete(store);

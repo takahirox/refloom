@@ -1,7 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { captureWebsite, connectChromeCdp } from '../src/chrome-capture.js';
+import {
+  captureDiagnosticCode, captureWebsite, connectChromeCdp, findChrome, verifyChromeRuntime
+} from '../src/chrome-capture.js';
+
+test('reports a stable browser-unavailable diagnostic without exposing candidate paths', async () => {
+  let failure;
+  await assert.rejects(findChrome('/secret/browser', async () => { throw new Error('missing'); }), error => {
+    failure = error;
+    return error.message === 'Website capture failed.';
+  });
+  assert.equal(captureDiagnosticCode(failure), 'BROWSER_UNAVAILABLE');
+  assert.doesNotMatch(failure.message, /secret|browser/);
+});
 
 test('connects to only the profile-published loopback CDP page endpoint', async () => {
   const commands = [];
@@ -92,9 +104,39 @@ test('drives bounded deterministic checkpoints and always cleans up', async () =
   assert.deepEqual(removed, ['/tmp/refloom-test']);
 });
 
-test('browser failures are generic and cleanup remains guaranteed', async () => {
+test('browser runtime verification launches loopback CDP without external navigation and cleans up', async () => {
+  const calls = [];
+  let killed = false;
+  let removed = false;
+  const process = new EventEmitter();
+  process.kill = () => { killed = true; };
+  const verified = await verifyChromeRuntime({
+    executable: '/runtime/chromium',
+    fs: {
+      access: async value => assert.equal(value, '/runtime/chromium'),
+      mkdtemp: async () => '/tmp/refloom-browser-check',
+      rm: async () => { removed = true; }
+    },
+    spawn: (file, args) => { calls.push({ file, args }); return process; },
+    connectCdp: async () => ({
+      send: async method => { calls.push({ method }); return {}; },
+      close: async () => { calls.push({ method: 'close' }); }
+    })
+  });
+  assert.equal(verified, true);
+  assert.equal(calls[0].file, '/runtime/chromium');
+  assert.equal(calls[0].args.includes('about:blank'), true);
+  assert.equal(calls[0].args.includes('--disable-dev-shm-usage'), true);
+  assert.equal(calls[0].args.includes('--no-sandbox'), false);
+  assert.equal(calls.some(call => call.method === 'Browser.getVersion'), true);
+  assert.equal(killed, true);
+  assert.equal(removed, true);
+});
+
+test('browser failures are generic, diagnosable, and cleanup remains guaranteed', async () => {
   let removed = false;
   let closed = false;
+  let failure;
   await assert.rejects(captureWebsite('https://example.com', {
     resolver: async () => [{ address: '93.184.216.34', family: 4 }],
     executable: '/secret/path/chrome',
@@ -102,7 +144,12 @@ test('browser failures are generic and cleanup remains guaranteed', async () => 
     spawn: () => ({ kill() {} }),
     createProxy: () => ({ listen: async () => ({ port: 1 }), close: async () => { closed = true; } }),
     connectCdp: async () => { throw new Error('/secret/path/chrome crashed'); }
-  }), { message: 'Website capture failed.' });
+  }), error => {
+    failure = error;
+    return error.message === 'Website capture failed.';
+  });
+  assert.equal(captureDiagnosticCode(failure), 'BROWSER_START_FAILED');
+  assert.doesNotMatch(failure.message, /secret|chrome/);
   assert.equal(removed, true);
   assert.equal(closed, true);
 });

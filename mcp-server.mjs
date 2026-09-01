@@ -189,6 +189,7 @@ export function createMcpServer(options = {}) {
     if (name === 'request_website_capture') {
       const requestValue = normalizeCaptureRequest(args);
       const capture = await captureReference(store, requestValue.referenceId, requestValue.settings);
+      if (capture.diagnostic) diagnostics.write(`Refloom MCP website capture diagnostic: ${capture.diagnostic}\n`);
       if (capture.status === 'complete' || capture.status === 'partial') return publicCaptureResult(capture);
       const codes = {
         CAPTURE_BUSY: 'CAPTURE_BUSY', INVALID_REFERENCE: 'INVALID_ARGUMENT',

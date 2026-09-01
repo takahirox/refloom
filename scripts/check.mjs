@@ -10,6 +10,8 @@ const required = [
   'Dockerfile',
   'compose.yaml',
   'compose.integration.yaml',
+  'config/README.md',
+  'config/chromium-seccomp.json',
   'docs/PRODUCT_SPEC.md',
   'docs/ARCHITECTURE.md',
   'docs/EXPORT_SCHEMA.md',
@@ -55,6 +57,7 @@ const required = [
   'test/server.test.js',
   'test/mcp-server.test.js',
   'scripts/check.mjs',
+  'scripts/check-browser.mjs',
   'scripts/init-bucket.mjs',
   'scripts/test-integration.mjs'
 ];
