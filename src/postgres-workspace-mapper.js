@@ -136,12 +136,13 @@ function boardSelectionMap(rowSets, boardIds) {
   return byBoard;
 }
 
-export function rowsToWorkspace(rowSets) {
+export function rowsToWorkspace(rowSets, settings = { automaticWebsiteCapture: true }) {
   requireRowSets(rowSets);
   const boardRows = stableRows(rowSets.boards);
   const boardSelections = boardSelectionMap(rowSets, boardRows.map(row => row?.id));
   const workspace = {
     version: 1,
+    settings: clone(settings),
     projects: stableRows(rowSets.projects).map(row => ({
       id: row.id, title: row.title, ...present('brief', optional(row.brief)), ...stampsFromRow(row)
     })),

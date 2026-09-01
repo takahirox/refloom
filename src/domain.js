@@ -1,5 +1,6 @@
 export const WORKSPACE_VERSION = 1;
 export const CREATIVE_DIRECTION_VERSION = 1;
+export const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({ automaticWebsiteCapture: true });
 
 const COLLECTIONS = ['projects', 'references', 'assets', 'targets', 'moments', 'selections', 'boards', 'signals'];
 const TARGET_KINDS = new Set(['reference', 'asset', 'region', 'frame', 'interaction']);
@@ -40,7 +41,25 @@ const need = (workspace, collection, entityId) => {
 };
 
 export function createWorkspace() {
-  return Object.fromEntries([['version', WORKSPACE_VERSION], ...COLLECTIONS.map(name => [name, []])]);
+  return Object.fromEntries([
+    ['version', WORKSPACE_VERSION],
+    ['settings', copy(DEFAULT_WORKSPACE_SETTINGS)],
+    ...COLLECTIONS.map(name => [name, []])
+  ]);
+}
+
+export function updateWorkspaceSettings(workspace, changes) {
+  validateWorkspace(workspace);
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)
+    || Object.keys(changes).some(key => key !== 'automaticWebsiteCapture')
+    || (changes.automaticWebsiteCapture !== undefined
+      && typeof changes.automaticWebsiteCapture !== 'boolean')) {
+    throw new TypeError('Workspace capture settings are invalid');
+  }
+  return {
+    ...copy(workspace),
+    settings: { ...copy(workspace.settings), ...copy(changes) }
+  };
 }
 
 export function createProject(workspace, input) {
@@ -212,6 +231,14 @@ export function importWorkspace(input) {
   let parsed;
   try { parsed = typeof input === 'string' ? JSON.parse(input) : copy(input); }
   catch { throw new ValidationError([{ path: '$', message: 'invalid JSON' }]); }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    if (parsed.settings === undefined) parsed.settings = copy(DEFAULT_WORKSPACE_SETTINGS);
+    else if (parsed.settings && typeof parsed.settings === 'object'
+      && !Array.isArray(parsed.settings)
+      && parsed.settings.automaticWebsiteCapture === undefined) {
+      parsed.settings.automaticWebsiteCapture = true;
+    }
+  }
   validateWorkspace(parsed);
   return copy(parsed);
 }
@@ -220,6 +247,17 @@ export function validateWorkspace(workspace) {
   const issues = [];
   if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) throw new ValidationError([{ path: '$', message: 'must be an object' }]);
   if (workspace.version !== WORKSPACE_VERSION) issues.push({ path: 'version', message: `must equal ${WORKSPACE_VERSION}` });
+  if (!workspace.settings || typeof workspace.settings !== 'object'
+    || Array.isArray(workspace.settings)) {
+    issues.push({ path: 'settings', message: 'must be an object' });
+  } else {
+    if (Object.keys(workspace.settings).some(key => key !== 'automaticWebsiteCapture')) {
+      issues.push({ path: 'settings', message: 'contains unsupported fields' });
+    }
+    if (typeof workspace.settings.automaticWebsiteCapture !== 'boolean') {
+      issues.push({ path: 'settings.automaticWebsiteCapture', message: 'must be a boolean' });
+    }
+  }
   for (const collection of COLLECTIONS) if (!Array.isArray(workspace[collection])) issues.push({ path: collection, message: 'must be an array' });
   if (issues.length) throw new ValidationError(issues);
   const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);

@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createPersistenceRepository } from './src/create-persistence-repository.js';
 import { PersistenceError } from './src/persistence-errors.js';
 import { normalizeCaptureRequest, publicCaptureResult } from './src/capture-request.js';
+import { CaptureScheduler } from './src/capture-scheduler.js';
 import { captureReference as defaultCaptureReference } from './src/website-capture-service.js';
 
 const MAX_BODY = 40 * 1024 * 1024;
@@ -58,11 +59,38 @@ function trustedRequest(request) {
   catch { return false; }
 }
 
-async function api(request, response, pathname, store, captureReference) {
+async function api(request, response, pathname, store, captureScheduler) {
   if (pathname === '/api/workspace' && request.method === 'GET') return json(response, 200, await store.load());
   if (pathname === '/api/workspace' && request.method === 'PUT') {
     const value = await body(request);
-    return json(response, 200, await store.commit(value.revision, value.workspace, value.binaries));
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).some(key => ![
+        'revision', 'workspace', 'binaries', 'capture', 'captureSettings'
+      ].includes(key))
+      || (value.capture !== undefined && typeof value.capture !== 'boolean')) {
+      throw new TypeError('Workspace mutation contains unsupported fields');
+    }
+    const settings = value.captureSettings === undefined ? {}
+      : normalizeCaptureRequest({
+        referenceId: 'workspace-mutation', settings: value.captureSettings
+      }).settings;
+    const committed = await store.commit(value.revision, value.workspace, value.binaries);
+    const createdIds = new Set(committed.createdReferenceIds ?? []);
+    const created = committed.workspace.references.filter(reference =>
+      reference.sourceUrl && createdIds.has(reference.id));
+    const enabled = value.capture
+      ?? committed.workspace.settings.automaticWebsiteCapture;
+    const captures = created.map(reference => {
+      if (!enabled) {
+        return {
+          referenceId: reference.id, status: 'skipped',
+          reason: value.capture === false ? 'explicit_opt_out' : 'workspace_default'
+        };
+      }
+      return captureScheduler.enqueue(reference.id, settings).outcome;
+    });
+    const { createdReferenceIds: _createdReferenceIds, ...state } = committed;
+    return json(response, 200, { ...state, captures });
   }
   if (pathname === '/api/backup' && request.method === 'GET') return send(response, 200, await store.exportBackup(), { 'Content-Type': 'application/json; charset=utf-8' });
   if (pathname === '/api/backup' && request.method === 'PUT') {
@@ -71,21 +99,32 @@ async function api(request, response, pathname, store, captureReference) {
   }
   if (pathname === '/api/captures' && request.method === 'POST') {
     const requestValue = normalizeCaptureRequest(await body(request, 16 * 1024));
-    const result = await captureReference(store, requestValue.referenceId, requestValue.settings);
+    const result = await captureScheduler.request(requestValue.referenceId, requestValue.settings);
     const value = publicCaptureResult(result);
     if (result.status === 'complete') return json(response, 201, value);
     if (result.status === 'partial') return json(response, 207, value);
+    if (result.status === 'cancelled') return json(response, 200, value);
     if (result.error === 'CAPTURE_BUSY') return json(response, 409, { status: 'busy', code: 'CAPTURE_BUSY' });
+    if (result.error === 'CAPTURE_QUEUE_FULL') return json(response, 429, { status: 'failed', code: 'CAPTURE_QUEUE_FULL' });
     if (result.error === 'INVALID_REFERENCE' || result.error === 'INVALID_SETTINGS') {
       return json(response, 400, { status: 'invalid', code: result.error });
     }
     return json(response, 502, { status: 'failed', code: 'CAPTURE_FAILED' });
   }
+  const captureStatus = pathname.match(/^\/api\/captures\/([^/]+)\/status$/);
+  if (captureStatus && request.method === 'GET') {
+    return json(response, 200, captureScheduler.status(decodeURIComponent(captureStatus[1])));
+  }
+  if (captureStatus && request.method === 'DELETE') {
+    return json(response, 202, captureScheduler.cancel(decodeURIComponent(captureStatus[1])));
+  }
   if (pathname.startsWith('/api/media/') && request.method === 'GET') {
     const media = await store.mediaInfo(decodeURIComponent(pathname.slice('/api/media/'.length)));
     return send(response, 200, media.contents, { 'Content-Type': media.mediaType });
   }
-  const allow = pathname === '/api/captures' ? 'POST' : pathname === '/api/workspace' || pathname === '/api/backup' ? 'GET, PUT' : 'GET';
+  const allow = pathname === '/api/captures' ? 'POST'
+    : /^\/api\/captures\/[^/]+\/status$/.test(pathname) ? 'GET, DELETE'
+      : pathname === '/api/workspace' || pathname === '/api/backup' ? 'GET, PUT' : 'GET';
   if (pathname.startsWith('/api/')) return send(response, 405, 'Method not allowed', { Allow: allow });
   return false;
 }
@@ -139,7 +178,13 @@ export function createRefloomServer(options = {}) {
     : { repository: options.store, cleanupIntervalMs: options.cleanupIntervalMs ?? 3_600_000 };
   const store = persistence.repository;
   const captureReference = options.captureReference ?? defaultCaptureReference;
-  const scheduler = options.scheduler ?? globalThis;
+  const captureScheduler = options.captureScheduler ?? new CaptureScheduler({
+    store,
+    captureReference,
+    maxConcurrent: options.captureConcurrency,
+    maxQueue: options.captureQueueLimit
+  });
+  const clock = options.scheduler ?? globalThis;
   let initializationState = 'initializing';
   let cleanupTimer;
   let cleanupRunning = false;
@@ -156,7 +201,7 @@ export function createRefloomServer(options = {}) {
   const initialization = Promise.resolve().then(() => store.initialize()).then(async value => {
     initializationState = 'ready';
     await cleanup();
-    cleanupTimer = scheduler.setInterval(cleanup, persistence.cleanupIntervalMs);
+    cleanupTimer = clock.setInterval(cleanup, persistence.cleanupIntervalMs);
     return value;
   }, error => {
     initializationState = 'failed';
@@ -191,7 +236,7 @@ export function createRefloomServer(options = {}) {
         return;
       }
       try {
-        await api(request, response, url.pathname, store, captureReference);
+        await api(request, response, url.pathname, store, captureScheduler);
       } catch (error) {
         const failure = apiFailure(error);
         send(response, failure.status, JSON.stringify(failure.value), { 'Content-Type': 'application/json; charset=utf-8', ...failure.headers });
@@ -261,11 +306,14 @@ export function createRefloomServer(options = {}) {
   Object.defineProperties(server, {
     initialization: { value: initialization },
     initializationState: { get: () => initializationState },
+    captureScheduler: { value: captureScheduler },
     repositoryClosed: { get: () => repositoryClose }
   });
   server.once('close', () => {
-    if (cleanupTimer !== undefined) scheduler.clearInterval(cleanupTimer);
-    repositoryClose ??= Promise.resolve().then(() => store.close());
+    if (cleanupTimer !== undefined) clock.clearInterval(cleanupTimer);
+    repositoryClose ??= Promise.resolve()
+      .then(() => captureScheduler.close())
+      .then(() => store.close());
     repositoryClose.catch(() => {});
   });
   return server;

@@ -222,8 +222,8 @@ export async function captureWebsite(input, options = {}) {
   let proxy;
   let browser;
   let cdp;
-  let cancelled = false;
-  const active = () => { if (cancelled) throw new Error(CAPTURE_ERROR); };
+  let cancelled = options.signal?.aborted || false;
+  const active = () => { if (cancelled || options.signal?.aborted) throw new Error(CAPTURE_ERROR); };
 
   async function cleanup() {
     try { await cdp?.close?.(); } catch { /* cleanup */ }
@@ -234,6 +234,12 @@ export async function captureWebsite(input, options = {}) {
     try { await proxy?.close?.(); } catch { /* cleanup */ }
     if (profile) try { await fs.rm(profile, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
+
+  const abort = () => {
+    cancelled = true;
+    void cleanup();
+  };
+  options.signal?.addEventListener?.('abort', abort, { once: true });
 
   const work = (async () => {
     const target = await normalizeCaptureUrl(input, { resolver: options.resolver });
@@ -343,6 +349,7 @@ export async function captureWebsite(input, options = {}) {
     throw diagnosticError(captureDiagnosticCode(error) || 'CAPTURE_RUNTIME_FAILED', error);
   } finally {
     cancelled = true;
+    options.signal?.removeEventListener?.('abort', abort);
     await cleanup();
     work.catch(() => {}).finally(cleanup);
   }

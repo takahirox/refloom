@@ -1,7 +1,8 @@
 import {
   createAsset, createBoard, createMoment, createProject, createReference, createSelection,
   createTarget, deleteProject, deleteReference, exportBoardMarkdown, exportCreativeDirection,
-  recordSignal, removeFromBoard, reorderBoard, updateProject, updateReference
+  recordSignal, removeFromBoard, reorderBoard, updateProject, updateReference,
+  updateWorkspaceSettings
 } from './domain.js';
 import { BLOB_PREFIX, RevisionConflictError, WorkspaceRepository, blobIdFromLocator } from './storage.js';
 import { displayReference, formatMoment, formatSignal, safeFilename } from './ui-format.js';
@@ -13,6 +14,11 @@ let projectId = readStoredProject();
 let objectUrls = [];
 let statusTimer;
 let dialogReturnFocus;
+const captureStates = new Map();
+const captureLabels = {
+  queued: 'Queued', capturing: 'Capturing', complete: 'Complete', partial: 'Partially complete',
+  failed: 'Failed', cancelled: 'Cancelled', skipped: 'Skipped', idle: 'Not started'
+};
 
 function readStoredProject() {
   try { return globalThis.localStorage?.getItem('refloom.project') ?? undefined; }
@@ -64,8 +70,9 @@ function announce(message, error = false) {
   statusTimer = setTimeout(() => status.classList.remove('visible'), 4500);
 }
 
-async function commit(next, additions = [], message = '') {
-  try { await repository.mutate(next, additions); }
+async function commit(next, additions = [], message = '', options = {}) {
+  let result;
+  try { result = await repository.mutate(next, additions, options); }
   catch (error) {
     if (error instanceof RevisionConflictError) {
       workspace = await repository.load();
@@ -76,20 +83,94 @@ async function commit(next, additions = [], message = '') {
   workspace = next;
   await render();
   if (message) announce(message);
+  return result;
+}
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function applyCaptureDefault() {
+  const enabled = workspace.settings.automaticWebsiteCapture;
+  $('#capture-website').checked = enabled;
+  $('#capture-settings').hidden = !enabled;
+  $('#automatic-website-capture').checked = enabled;
+}
+
+async function monitorCapture(referenceId, running) {
+  let last = captureStates.get(referenceId)?.status;
+  while (running.value) {
+    try {
+      const state = await repository.captureStatus(referenceId);
+      if (state.status !== last) {
+        last = state.status;
+        captureStates.set(referenceId, state);
+        await render();
+      }
+      if (!['queued', 'capturing'].includes(state.status)) return;
+    } catch { return; }
+    await delay(250);
+  }
 }
 
 async function captureWebsite(referenceId, settings, control) {
-  control.disabled = true;
+  if (control) control.disabled = true;
+  const running = { value: true };
+  captureStates.set(referenceId, { referenceId, status: 'queued' });
+  await render();
+  const request = repository.captureWebsite(referenceId, settings);
+  const monitoring = monitorCapture(referenceId, running);
   try {
-    const result = await repository.captureWebsite(referenceId, settings);
+    const result = await request;
+    captureStates.set(referenceId, { referenceId, ...result });
     workspace = await repository.load();
     await render();
-    announce(result.status === 'complete' ? 'Website capture complete' : 'Website capture partially completed', result.status === 'partial');
+    const messages = {
+      complete: 'Website capture complete',
+      partial: 'Website capture partially completed',
+      cancelled: 'Website capture cancelled',
+      failed: `Website capture failed (${result.code || 'CAPTURE_FAILED'}); the saved URL is still available`,
+      busy: 'Website capture is already running'
+    };
+    announce(messages[result.status] || 'Website capture did not start',
+      !['complete', 'cancelled'].includes(result.status));
   } catch {
+    captureStates.set(referenceId, { referenceId, status: 'failed', code: 'CAPTURE_FAILED' });
     workspace = await repository.load();
     await render();
-    announce('Website capture failed; the saved URL is still available', true);
-  } finally { if (control.isConnected) control.disabled = false; }
+    announce('Website capture failed (CAPTURE_FAILED); the saved URL is still available', true);
+  } finally {
+    running.value = false;
+    await monitoring;
+    if (control?.isConnected) control.disabled = false;
+  }
+}
+
+async function waitForScheduledCapture(referenceId, initial, control) {
+  if (control) control.disabled = true;
+  let state = initial;
+  captureStates.set(referenceId, state);
+  await render();
+  try {
+    for (let attempt = 0; attempt < 400
+      && ['queued', 'capturing'].includes(state.status); attempt += 1) {
+      await delay(250);
+      const previous = state.status;
+      state = await repository.captureStatus(referenceId);
+      captureStates.set(referenceId, state);
+      if (state.status !== previous) await render();
+    }
+    workspace = await repository.load();
+    await render();
+    const message = state.status === 'complete' ? 'Website capture complete'
+      : state.status === 'partial' ? 'Website capture partially completed'
+        : state.status === 'cancelled' ? 'Website capture cancelled'
+          : `Website capture failed (${state.code || 'CAPTURE_FAILED'}); the saved URL is still available`;
+    announce(message, !['complete', 'cancelled'].includes(state.status));
+  } catch {
+    captureStates.set(referenceId, {
+      referenceId, status: 'failed', code: 'CAPTURE_FAILED'
+    });
+    announce('Website capture failed (CAPTURE_FAILED); the saved URL is still available', true);
+  } finally { if (control?.isConnected) control.disabled = false; }
 }
 
 function signal(next, event, subject, facts = {}) {
@@ -228,6 +309,26 @@ async function renderLibrary() {
     websiteCapture?.addEventListener('click', () => captureWebsite(reference.id, {
       width: 1440, height: 900, checkpoints: 3, readinessMs: 1000, settleMs: 500, maxRedirects: 10
     }, websiteCapture));
+    const captureState = captureStates.get(reference.id);
+    if (websiteCapture && captureState && ['queued', 'capturing'].includes(captureState.status)) {
+      websiteCapture.disabled = true;
+    }
+    const captureStatus = captureState ? element('p', {
+      className: 'meta capture-status',
+      text: `Capture status: ${captureState.cancelRequested
+        ? 'Cancelling' : captureLabels[captureState.status] || captureState.status}${
+        captureState.code ? ` (${captureState.code})` : ''}`
+    }) : null;
+    const cancelCapture = captureState && ['queued', 'capturing'].includes(captureState.status)
+      ? element('button', { type: 'button', text: 'Cancel capture' }) : null;
+    cancelCapture?.addEventListener('click', async () => {
+      try {
+        const result = await repository.cancelCapture(reference.id);
+        captureStates.set(reference.id, result);
+        await render();
+        announce('Website capture cancellation requested');
+      } catch (error) { announce(error.message, true); }
+    });
     const select = element('button', { type: 'button', className: 'primary', text: 'Select for board' });
     select.addEventListener('click', () => selectionEditor(reference));
     const remove = element('button', { type: 'button', className: 'danger', text: 'Delete' });
@@ -238,8 +339,9 @@ async function renderLibrary() {
     const card = element('article', { className: 'reference-card' }, [
       await mediaPreview(previewAsset), element('h2', { text: displayReference(reference) }),
       element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
+      captureStatus,
       reference.notes ? element('p', { text: reference.notes }) : null,
-      element('div', { className: 'actions' }, [edit, add, websiteCapture, select, remove])
+      element('div', { className: 'actions' }, [edit, add, websiteCapture, cancelCapture, select, remove])
     ]);
     cards.push(card);
   }
@@ -289,6 +391,7 @@ async function render() {
   $('#project-select').disabled = !project;
   $('#edit-project').disabled = !project;
   $('#project-brief').textContent = project?.brief || '';
+  $('#automatic-website-capture').checked = workspace.settings.automaticWebsiteCapture;
   $('#welcome').hidden = Boolean(project);
   const route = location.hash.slice(1) || 'library';
   for (const view of document.querySelectorAll('.view')) view.hidden = !project || view.id !== route;
@@ -332,14 +435,34 @@ function bindEvents() {
     const optedIn = data.get('captureWebsite') === 'on';
     const settings = Object.fromEntries(['width', 'height', 'checkpoints', 'readinessMs', 'settleMs'].map(key => [key, Number(data.get(key))]));
     const submit = form.querySelector('[type="submit"]');
+    submit.disabled = true;
     try {
-      await commit(next, [], 'URL captured');
+      const result = await commit(next, [], 'URL saved', {
+        capture: optedIn,
+        ...(optedIn ? { captureSettings: { ...settings, maxRedirects: 10 } } : {})
+      });
       form.reset();
-      $('#capture-settings').hidden = true;
-    } catch (error) { announce(error.message, true); return; }
-    if (optedIn) await captureWebsite(reference.id, { ...settings, maxRedirects: 10 }, submit);
+      applyCaptureDefault();
+      const capture = result.captures?.find(item => item.referenceId === reference.id)
+        ?? { referenceId: reference.id, status: 'skipped', reason: 'explicit_opt_out' };
+      captureStates.set(reference.id, capture);
+      if (optedIn) await waitForScheduledCapture(reference.id, capture, submit);
+    } catch (error) { submit.disabled = false; announce(error.message, true); return; }
+    if (!optedIn) submit.disabled = false;
   });
   $('#capture-website').addEventListener('change', event => { $('#capture-settings').hidden = !event.currentTarget.checked; });
+  $('#automatic-website-capture').addEventListener('change', async event => {
+    const enabled = event.currentTarget.checked;
+    try {
+      await commit(updateWorkspaceSettings(workspace, {
+        automaticWebsiteCapture: enabled
+      }), [], `Automatic website capture default ${enabled ? 'enabled' : 'disabled'}`);
+      applyCaptureDefault();
+    } catch (error) {
+      event.currentTarget.checked = workspace.settings.automaticWebsiteCapture;
+      announce(error.message, true);
+    }
+  });
   $('#choose-files').addEventListener('click', () => { delete $('#file-input').dataset.referenceId; $('#file-input').click(); });
   $('#file-input').addEventListener('change', async event => { try { await captureFiles(event.target.files, event.target.dataset.referenceId); } catch (error) { announce(error.message, true); } event.target.value = ''; delete event.target.dataset.referenceId; });
   const drop = $('#drop-zone');
@@ -351,9 +474,9 @@ function bindEvents() {
   $('#library-search').addEventListener('input', renderLibrary); $('#aspect-filter').addEventListener('change', renderBoard);
   $('#export-json').addEventListener('click', () => exportBoard('json')); $('#export-markdown').addEventListener('click', () => exportBoard('markdown'));
   $('#backup').addEventListener('click', async () => { try { download('refloom-workspace-backup.json', await repository.exportBackup(workspace), 'application/json'); announce('Workspace backup downloaded'); } catch (error) { announce(error.message, true); } });
-  $('#restore-file').addEventListener('change', async event => { try { if (!await confirmAction('Replace the current workspace with this backup?')) return; workspace = await repository.importBackup(await event.target.files[0].text()); projectId = workspace.projects[0]?.id; location.hash = 'library'; await render(); announce('Workspace restored'); } catch (error) { announce(`Import failed: ${error.message}`, true); } finally { event.target.value = ''; } });
+  $('#restore-file').addEventListener('change', async event => { try { if (!await confirmAction('Replace the current workspace with this backup?')) return; workspace = await repository.importBackup(await event.target.files[0].text()); projectId = workspace.projects[0]?.id; location.hash = 'library'; applyCaptureDefault(); await render(); announce('Workspace restored'); } catch (error) { announce(`Import failed: ${error.message}`, true); } finally { event.target.value = ''; } });
   $('#delete-project').addEventListener('click', async () => { const project = activeProject(); if (!project || !await confirmAction(`Delete project “${project.title}” and all of its workspace data?`)) return; const next = deleteProject(workspace, project.id); projectId = next.projects[0]?.id; await commit(next, [], 'Project deleted'); });
-  $('#reset').addEventListener('click', async () => { if (!await confirmAction('Permanently reset every project, reference, binary, board, and activity record in the shared workspace? This affects every client using it.')) return; workspace = await repository.reset(); projectId = undefined; storeProject(); location.hash = 'library'; await render(); announce('The shared Refloom workspace was reset'); });
+  $('#reset').addEventListener('click', async () => { if (!await confirmAction('Permanently reset every project, reference, binary, board, and activity record in the shared workspace? This affects every client using it.')) return; workspace = await repository.reset(); projectId = undefined; storeProject(); location.hash = 'library'; applyCaptureDefault(); await render(); announce('The shared Refloom workspace was reset'); });
 }
 
 async function start() {
@@ -361,6 +484,7 @@ async function start() {
   try {
     await repository.open();
     workspace = await repository.load();
+    applyCaptureDefault();
     await render();
   }
   catch (error) { $('#fatal').hidden = false; $('#fatal').textContent = error.message; for (const control of document.querySelectorAll('button,input,select,textarea')) control.disabled = true; }

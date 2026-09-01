@@ -32,6 +32,8 @@ The browser code is separated into these boundaries:
   lifecycle.
 - `website-capture-service.js`: progressive checkpoint persistence into the
   existing Asset, Target, and Moment model with bounded revision-race retries.
+- `capture-scheduler.js`: bounded process-wide concurrency, queueing, status,
+  cancellation, and safe public job history for UI/API/MCP capture requests.
 - `capture-request.js`: the strict shared HTTP/MCP request whitelist and public
   result projection; URL and process settings never cross these surfaces.
 
@@ -57,7 +59,8 @@ through owned entities so boards cannot retain dangling selections.
 ## Storage boundaries
 
 PostgreSQL owns normalized entity rows and one locked `workspace_state`
-revision. S3 owns immutable media at `media/<opaque-id>`. A mutation validates
+revision plus shared Workspace settings. S3 owns immutable media at
+`media/<opaque-id>`. A mutation validates
 the complete workspace, uploads and verifies new bytes, locks the singleton
 revision row, replaces relational rows in one transaction, verifies every blob
 reference, and advances the revision exactly once. A database failure after an
@@ -101,11 +104,13 @@ relationships, verify required binary records, then replace local state in one
 revisioned commit. A stale writer receives a conflict and reloads authoritative
 state. The browser and stdio MCP process use this same shared boundary.
 
-Website capture is reference-first. The UI commits the Reference and URL Asset,
-then optionally posts its ID and bounded settings. HTTP and MCP call the same
-capture service, which reloads the stored source URL and commits each completed
-screenshot independently. Partial failure cannot roll back the URL or earlier
-states.
+Website capture is reference-first. Creating a website Reference through UI,
+HTTP, or MCP commits it before the default-on initial capture is queued. A
+visible per-create choice can override the shared Workspace default. HTTP and
+MCP use the same bounded scheduler and capture service, which reloads the stored
+source URL and commits each completed screenshot independently. Partial failure
+or cancellation cannot roll back the URL or earlier checkpoints. URL edits and
+later captures remain explicit.
 
 ## Versioning
 

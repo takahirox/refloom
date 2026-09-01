@@ -188,3 +188,20 @@ test('uses the driver settings bounds and preserves store media limits', async (
   assert.deepEqual(result, { status: 'failed', captured: [], error: 'CAPTURE_FAILED' });
   assert.equal((await limited.load()).workspace.assets.length, 0);
 });
+
+test('reports cancellation separately while retaining the saved Reference', async () => {
+  const store = await fixture();
+  const controller = new AbortController();
+  const driver = async (_url, options) => {
+    assert.equal(options.signal, controller.signal);
+    controller.abort();
+    throw new Error('aborted');
+  };
+  const result = await captureReference(store, 'reference-1', {}, {
+    ...dependencies(driver, []), signal: controller.signal
+  });
+  assert.deepEqual(result, {
+    status: 'cancelled', captured: [], error: 'CAPTURE_CANCELLED'
+  });
+  assert.equal((await store.load()).workspace.references.length, 1);
+});

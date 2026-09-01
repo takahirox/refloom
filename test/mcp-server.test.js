@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { createBoard, createProject, createReference, createTarget, createWorkspace } from '../src/domain.js';
+import {
+  createBoard, createProject, createReference, createTarget, createWorkspace,
+  updateWorkspaceSettings
+} from '../src/domain.js';
 import { PersistenceError, RevisionConflictError } from '../src/persistence-errors.js';
 import { createMcpServer, runStdio } from '../mcp-server.mjs';
 
@@ -38,8 +41,8 @@ function fixture() {
   return new MemoryRepository(workspace);
 }
 
-function client(store) {
-  const server = createMcpServer({ store, diagnostics: { write() {} } });
+function client(store, options = {}) {
+  const server = createMcpServer({ store, diagnostics: { write() {} }, ...options });
   let nextId = 1;
   const request = async (method, params) => {
     const id = nextId++;
@@ -72,6 +75,7 @@ test('stdio discovery, progressive reads, additive writes, media, errors, and re
   assert.ok(!names.some(name => /delete|remove|reset|replace/.test(name)));
   assert.equal(discovered.result.tools.find(tool => tool.name === 'list_projects').annotations.readOnlyHint, true);
   assert.equal(discovered.result.tools.find(tool => tool.name === 'create_reference').annotations.destructiveHint, false);
+  assert.equal(discovered.result.tools.find(tool => tool.name === 'create_reference').annotations.openWorldHint, true);
   const captureTool = discovered.result.tools.find(tool => tool.name === 'request_website_capture');
   assert.equal(captureTool.annotations.readOnlyHint, false);
   assert.equal(captureTool.annotations.destructiveHint, false);
@@ -135,6 +139,63 @@ test('stdio discovery, progressive reads, additive writes, media, errors, and re
 
   const invalidArguments = await mcp.request('tools/call', { name: 'list_projects', arguments: { unexpected: true } });
   assert.equal(invalidArguments.result.structuredContent.error.code, 'INVALID_ARGUMENT');
+});
+
+test('MCP reference creation defaults website capture on and supports both opt-out paths', async t => {
+  const store = fixture();
+  const calls = [];
+  const mcp = client(store, {
+    captureReference: async (...args) => {
+      calls.push(args);
+      return { status: 'complete', captured: [] };
+    }
+  });
+  t.after(() => mcp.server.close());
+
+  const automatic = await mcp.request('tools/call', { name: 'create_reference', arguments: {
+    projectId: 'project_one', title: 'Website', sourceUrl: 'https://example.com'
+  } });
+  assert.equal(automatic.result.structuredContent.revision, 2);
+  assert.equal(automatic.result.structuredContent.capture.status, 'queued');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1], automatic.result.structuredContent.entity.id);
+  const status = await mcp.request('tools/call', { name: 'get_capture_status', arguments: {
+    referenceId: automatic.result.structuredContent.entity.id
+  } });
+  assert.equal(status.result.structuredContent.status, 'complete');
+
+  const optedOut = await mcp.request('tools/call', { name: 'create_reference', arguments: {
+    projectId: 'project_one', title: 'Saved only', sourceUrl: 'https://example.org',
+    capture: false, expectedRevision: 2
+  } });
+  assert.deepEqual(optedOut.result.structuredContent.capture, {
+    status: 'skipped', reason: 'explicit_opt_out'
+  });
+  assert.equal(calls.length, 1);
+
+  store.workspace = updateWorkspaceSettings(store.workspace, { automaticWebsiteCapture: false });
+  const preference = await mcp.request('tools/call', { name: 'create_reference', arguments: {
+    projectId: 'project_one', title: 'Workspace default', sourceUrl: 'https://example.net',
+    expectedRevision: 3
+  } });
+  assert.deepEqual(preference.result.structuredContent.capture, {
+    status: 'skipped', reason: 'workspace_default'
+  });
+  assert.equal(calls.length, 1);
+
+  const override = await mcp.request('tools/call', { name: 'create_reference', arguments: {
+    projectId: 'project_one', title: 'Override', sourceUrl: 'https://example.edu',
+    capture: true, expectedRevision: 4
+  } });
+  assert.equal(override.result.structuredContent.capture.status, 'queued');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 2);
+
+  const invalid = await mcp.request('tools/call', { name: 'create_reference', arguments: {
+    projectId: 'project_one', capture: 'yes'
+  } });
+  assert.equal(invalid.result.structuredContent.error.code, 'INVALID_ARGUMENT');
 });
 
 test('injected MCP capture returns structured results and bounded tool errors', async () => {

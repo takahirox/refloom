@@ -97,6 +97,13 @@ mutations return `REVISION_CONFLICT` instead of overwriting newer state.
 The `request_website_capture` tool is an explicitly open-world, non-destructive
 action: it accepts an existing Reference ID and bounded capture settings, then
 uses only that Reference's stored source URL.
+Creating a Reference with a website `sourceUrl` is also open-world: one initial
+capture is queued by default after the Reference commit succeeds. Pass
+`capture: false` to `create_reference` to opt out for that creation. Use
+`get_capture_status` to observe `queued`, `capturing`, and final states, or
+`cancel_website_capture` to cancel without deleting the Reference or an already
+committed checkpoint. The shared Workspace preference controls the default but
+an explicit per-call value wins.
 
 Captured binary media is exposed as `refloom://media/<opaque-id>` MCP resources.
 Only media currently referenced by a registered workspace asset can be read;
@@ -114,8 +121,10 @@ rendering constraints.
 
 1. Create a project and optional brief.
 2. Capture an image by picker, drop, or clipboard, or save a URL immediately.
-3. Optionally enrich a saved URL with bounded initial/scroll screenshots. The
-   URL remains saved if Chrome is unavailable or a later checkpoint fails.
+3. A newly saved website URL queues bounded initial/scroll screenshots by
+   default. Disable the visible per-create control or shared Workspace default
+   to save without external access. The URL remains saved if capture is
+   cancelled, Chrome is unavailable, or a later checkpoint fails.
 4. Enrich the reference later with provenance, notes, and more image or video
    assets.
 5. Select an exact reference target or moment, name the relevant aspect, and

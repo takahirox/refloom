@@ -20,8 +20,9 @@ are finite implementation or research work, so closing Issues #1, #2, #3, or
   revision across HTTP/MCP/capture, backup version 2, and cascade deletion.
 - Keyboard-accessible responsive UI, safe text rendering, security headers,
   domain/storage tests, and HTTP contract tests.
-- Opt-in controlled-Chrome capture of bounded initial and deterministic scroll
-  screenshots, with progressive Asset/Target/Moment persistence and UI/MCP use.
+- Default-on controlled-Chrome capture of bounded initial and deterministic
+  scroll screenshots, with visible opt-out controls, progressive
+  Asset/Target/Moment persistence, and UI/MCP use.
 
 ## Future: richer experience capture
 

@@ -44,9 +44,9 @@
           <h2>Save a URL</h2>
           <label for="capture-url">Source URL</label>
           <div class="inline"><input id="capture-url" name="url" type="url" required placeholder="https://example.com"><button class="primary" type="submit">Save</button></div>
-          <p class="hint">The URL is saved first. No network request is made unless website capture is selected.</p>
-          <label class="check-option"><input id="capture-website" name="captureWebsite" type="checkbox" aria-controls="capture-settings"> Capture website after saving</label>
-          <fieldset id="capture-settings" class="capture-settings" hidden>
+          <p class="hint">The URL is saved first. Initial website capture is on by default and can be disabled below.</p>
+          <label class="check-option"><input id="capture-website" name="captureWebsite" type="checkbox" aria-controls="capture-settings" checked> Automatically capture after saving</label>
+          <fieldset id="capture-settings" class="capture-settings">
             <legend>Website capture settings</legend>
             <label>Viewport width <input name="width" type="number" min="320" max="2560" value="1440" required></label>
             <label>Viewport height <input name="height" type="number" min="320" max="1440" value="900" required></label>
@@ -80,6 +80,11 @@
 
     <section id="data" class="view" aria-labelledby="data-title" hidden>
       <div class="section-head"><div><p class="eyebrow">Shared workspace data</p><h1 id="data-title">Backup and reset</h1></div></div>
+      <div class="panel preference-panel">
+        <h2>Website capture default</h2>
+        <label class="check-option"><input id="automatic-website-capture" type="checkbox" checked> Automatically capture newly saved website References</label>
+        <p class="hint">This shared Workspace preference changes the visible default. Each URL can still opt in or out before saving.</p>
+      </div>
       <div class="panel data-actions"><button id="backup" type="button">Download workspace backup</button><label class="button" for="restore-file">Import workspace backup</label><input id="restore-file" class="sr-only" type="file" accept="application/json"><button id="delete-project" class="danger" type="button">Delete current project</button><button id="reset" class="danger" type="button">Reset shared workspace</button></div>
       <p class="hint">Backups contain workspace records and captured binary files from the authoritative workspace service.</p>
     </section>

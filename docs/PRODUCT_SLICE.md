@@ -19,7 +19,9 @@ no third-party packages.
 
 1. Create and switch between projects with a title and optional brief.
 2. Capture an image by file picker, drag/drop, or clipboard; alternatively save
-   a URL immediately without waiting for metadata or screenshots.
+   a URL immediately and queue its initial screenshots by default. The visible
+   per-create and shared Workspace controls can opt out before external access,
+   and capture never delays or rolls back the URL commit.
 3. Enrich a reference later with title, source URL, creator, notes, additional
    image assets, and video assets while preserving capture metadata.
 4. Create a project-scoped selection that keeps Reference, Asset/Target,

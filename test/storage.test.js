@@ -181,3 +181,35 @@ test('WorkspaceRepository sends a bounded website capture request', async () => 
   assert.equal(calls[0].options.method, 'POST');
   assert.deepEqual(JSON.parse(calls[0].options.body), { referenceId: 'reference-1', settings: { width: 800 } });
 });
+
+test('WorkspaceRepository reads and cancels capture status without exposing another endpoint', async () => {
+  const calls = [];
+  const repository = new WorkspaceRepository(async (path, options = {}) => {
+    calls.push({ path, options });
+    return new Response(JSON.stringify({ referenceId: 'reference-1', status: 'capturing' }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  });
+  assert.equal((await repository.captureStatus('reference-1')).status, 'capturing');
+  assert.equal((await repository.cancelCapture('reference-1')).status, 'capturing');
+  assert.deepEqual(calls.map(item => [item.path, item.options.method]), [
+    ['/api/captures/reference-1/status', undefined],
+    ['/api/captures/reference-1/status', 'DELETE']
+  ]);
+});
+
+test('WorkspaceRepository preserves stable capture failures as structured outcomes', async () => {
+  let status = 429;
+  const repository = new WorkspaceRepository(async () => new Response(JSON.stringify(
+    status === 409
+      ? { status: 'busy', code: 'CAPTURE_BUSY' }
+      : { status: 'failed', code: 'CAPTURE_QUEUE_FULL' }
+  ), { status, headers: { 'Content-Type': 'application/json' } }));
+  assert.deepEqual(await repository.captureWebsite('reference-1'), {
+    status: 'failed', code: 'CAPTURE_QUEUE_FULL'
+  });
+  status = 409;
+  assert.deepEqual(await repository.captureWebsite('reference-1'), {
+    status: 'busy', code: 'CAPTURE_BUSY'
+  });
+});
