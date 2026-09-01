@@ -140,6 +140,40 @@ test('PostgreSQL and S3 are one authoritative path for repository, HTTP, and MCP
   });
   assert.deepEqual(Buffer.from(capturedMedia.contents[0].blob, 'base64'), Buffer.from('captured-checkpoint'));
 
+  const automatic = await captureMcp.handle({
+    method: 'tools/call', params: { name: 'create_reference', arguments: {
+      projectId: 'project_1', title: 'Automatically captured',
+      sourceUrl: 'https://example.com', expectedRevision: 3
+    } }
+  });
+  assert.equal(automatic.structuredContent.capture.status, 'queued');
+  const automaticId = automatic.structuredContent.entity.id;
+  let automaticStatus;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    automaticStatus = await captureMcp.handle({
+      method: 'tools/call', params: { name: 'get_capture_status', arguments: {
+        referenceId: automaticId
+      } }
+    });
+    if (!['queued', 'capturing'].includes(automaticStatus.structuredContent.status)) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(automaticStatus.structuredContent.status, 'complete');
+  const automaticReference = await captureMcp.handle({
+    method: 'tools/call', params: { name: 'get_reference', arguments: {
+      referenceId: automaticId, limit: 100
+    } }
+  });
+  assert.equal(automaticReference.structuredContent.assets.length, 1);
+  assert.equal(automaticReference.structuredContent.targets.length, 1);
+  assert.equal(automaticReference.structuredContent.moments.length, 1);
+  const automaticMedia = await captureMcp.handle({
+    method: 'resources/read', params: {
+      uri: automaticReference.structuredContent.assets[0].resourceUri
+    }
+  });
+  assert.deepEqual(Buffer.from(automaticMedia.contents[0].blob, 'base64'), Buffer.from('captured-checkpoint'));
+
   const httpStore = repository();
   const server = createRefloomServer({ store: httpStore });
   server.listen(0, '127.0.0.1');
@@ -155,7 +189,7 @@ test('PostgreSQL and S3 are one authoritative path for repository, HTTP, and MCP
   assert.equal(ready.status, 200);
   const response = await fetch(`${base}/api/workspace`);
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).revision, 3);
+  assert.equal((await response.json()).revision, 5);
   assert.equal((await fetch(`${base}/api/workspace`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ revision: 1, workspace: fixture(), binaries: [] })

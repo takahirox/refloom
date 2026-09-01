@@ -8,6 +8,7 @@ import { createPersistenceRepository } from './src/create-persistence-repository
 import { PersistenceError, RevisionConflictError } from './src/persistence-errors.js';
 import { blobIdFromLocator } from './src/storage.js';
 import { normalizeCaptureRequest, publicCaptureResult } from './src/capture-request.js';
+import { CaptureScheduler } from './src/capture-scheduler.js';
 import { captureReference as defaultCaptureReference } from './src/website-capture-service.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -32,7 +33,7 @@ const tools = [
   { name: 'search_selections', description: 'Locate paginated selections by project, aspect, intent, or related reference title.', inputSchema: objectSchema({ projectId: string('Project ID', 128), aspect: string('Case-insensitive aspect filter', MAX_QUERY), query: string('Case-insensitive aspect, intent, or reference-title query', MAX_QUERY), ...page }) },
   { name: 'get_selection', description: 'Get a selection with its target, moment, reference, and asset.', inputSchema: required(objectSchema({ selectionId: string('Selection ID', 128) }), 'selectionId') },
   { name: 'get_creative_direction', description: 'Get versioned creative-direction export for one board, or all boards in one project.', inputSchema: objectSchema({ boardId: string('Board ID', 128), projectId: string('Project ID', 128) }) },
-  { name: 'create_reference', description: 'Add a reference to an existing project.', inputSchema: required(objectSchema({ projectId: string('Project ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), captureMethod: string('Capture method', 128), expectedRevision: { type: 'integer', minimum: 0 } }), 'projectId') },
+  { name: 'create_reference', description: 'Add a reference and, for a saved website URL, queue one initial capture by default. Set capture to false to opt out.', inputSchema: required(objectSchema({ projectId: string('Project ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), captureMethod: string('Capture method', 128), capture: { type: 'boolean', description: 'Override the shared default for this creation' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'projectId') },
   { name: 'enrich_reference', description: 'Add or replace supplied descriptive fields on an existing reference; it never deletes the reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId') },
   { name: 'add_asset', description: 'Register a URL asset or add base64 image/video bytes to an existing reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), kind: { type: 'string', enum: ['url', 'image', 'video'] }, locator: string('Absolute http(s) URL for URL assets'), mediaType: string('MIME type', 255), filename: string('Original filename', 1024), data: string('Canonical base64 bytes for image/video assets', 36_000_000), provenance: { type: 'object' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId', 'kind') },
   { name: 'create_target', description: 'Add a precise target to a reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), assetId: string('Asset ID', 128), kind: { type: 'string', enum: ['reference', 'asset', 'region', 'frame', 'interaction'] }, detail: { type: 'object' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId', 'kind') },
@@ -53,9 +54,11 @@ const tools = [
         maxRedirects: { type: 'integer', minimum: 0, maximum: 20 }
       })
     }), 'referenceId')
-  }
+  },
+  { name: 'get_capture_status', description: 'Get the process-local status of a queued, running, or recent website capture.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128) }), 'referenceId') },
+  { name: 'cancel_website_capture', description: 'Cancel a queued or running website capture without deleting its Reference or completed checkpoints.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128) }), 'referenceId') }
 ];
-const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'get_reference', 'search_selections', 'get_selection', 'get_creative_direction']);
+const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'get_reference', 'search_selections', 'get_selection', 'get_creative_direction', 'get_capture_status']);
 for (const tool of tools) tool.annotations = {
   title: tool.name.replaceAll('_', ' '),
   readOnlyHint: readTools.has(tool.name),
@@ -67,6 +70,11 @@ const captureTool = tools.find(tool => tool.name === 'request_website_capture');
 captureTool.annotations = {
   title: 'request website capture', readOnlyHint: false,
   destructiveHint: false, idempotentHint: false, openWorldHint: true
+};
+tools.find(tool => tool.name === 'create_reference').annotations.openWorldHint = true;
+tools.find(tool => tool.name === 'cancel_website_capture').annotations = {
+  title: 'cancel website capture', readOnlyHint: false,
+  destructiveHint: false, idempotentHint: true, openWorldHint: false
 };
 const toolsByName = new Map(tools.map(tool => [tool.name, tool]));
 
@@ -123,6 +131,7 @@ function validateArguments(name, args) {
     if (property.type === 'string' && typeof value !== 'string') fail('INVALID_ARGUMENT', `${field} must be a string`);
     if (property.type === 'integer' && !Number.isSafeInteger(value)) fail('INVALID_ARGUMENT', `${field} must be an integer`);
     if (property.type === 'number' && !Number.isFinite(value)) fail('INVALID_ARGUMENT', `${field} must be a finite number`);
+    if (property.type === 'boolean' && typeof value !== 'boolean') fail('INVALID_ARGUMENT', `${field} must be a boolean`);
     if (property.type === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) fail('INVALID_ARGUMENT', `${field} must be an object`);
     if (property.minimum !== undefined && value < property.minimum) fail('INVALID_ARGUMENT', `${field} is below its minimum`);
     if (property.maximum !== undefined && value > property.maximum) fail('INVALID_ARGUMENT', `${field} exceeds its maximum`);
@@ -160,6 +169,12 @@ export function createMcpServer(options = {}) {
   const store = options.store ?? createPersistenceRepository({ env: options.env ?? process.env }).repository;
   const diagnostics = options.diagnostics ?? process.stderr;
   const captureReference = options.captureReference ?? defaultCaptureReference;
+  const captureScheduler = options.captureScheduler ?? new CaptureScheduler({
+    store,
+    captureReference,
+    maxConcurrent: options.captureConcurrency,
+    maxQueue: options.captureQueueLimit
+  });
   let initialization;
   let closing;
 
@@ -171,7 +186,17 @@ export function createMcpServer(options = {}) {
     return initialization;
   }
 
-  function close() { return closing ??= Promise.resolve().then(() => store.close()); }
+  function close() {
+    return closing ??= Promise.resolve()
+      .then(() => captureScheduler.close())
+      .then(() => store.close());
+  }
+
+  function captureDiagnostic(capture) {
+    if (capture?.diagnostic) {
+      diagnostics.write(`Refloom MCP website capture diagnostic: ${capture.diagnostic}\n`);
+    }
+  }
 
   async function mutate(args, operation) {
     const current = await store.load();
@@ -188,17 +213,21 @@ export function createMcpServer(options = {}) {
     validateArguments(name, args);
     if (name === 'request_website_capture') {
       const requestValue = normalizeCaptureRequest(args);
-      const capture = await captureReference(store, requestValue.referenceId, requestValue.settings);
-      if (capture.diagnostic) diagnostics.write(`Refloom MCP website capture diagnostic: ${capture.diagnostic}\n`);
+      const capture = await captureScheduler.request(requestValue.referenceId, requestValue.settings);
+      captureDiagnostic(capture);
       if (capture.status === 'complete' || capture.status === 'partial') return publicCaptureResult(capture);
+      if (capture.status === 'cancelled') return publicCaptureResult(capture);
       const codes = {
         CAPTURE_BUSY: 'CAPTURE_BUSY', INVALID_REFERENCE: 'INVALID_ARGUMENT',
-        INVALID_SETTINGS: 'INVALID_ARGUMENT', CAPTURE_FAILED: 'CAPTURE_FAILED'
+        INVALID_SETTINGS: 'INVALID_ARGUMENT', CAPTURE_QUEUE_FULL: 'CAPTURE_QUEUE_FULL',
+        CAPTURE_FAILED: 'CAPTURE_FAILED'
       };
       fail(codes[capture.error] || 'CAPTURE_FAILED', capture.error === 'CAPTURE_BUSY'
         ? 'A capture is already running for this reference' : capture.error?.startsWith('INVALID_')
           ? 'The capture request is invalid' : 'Website capture failed');
     }
+    if (name === 'get_capture_status') return captureScheduler.status(args.referenceId);
+    if (name === 'cancel_website_capture') return captureScheduler.cancel(args.referenceId);
     const { revision, workspace } = await store.load();
     if (name === 'list_projects') {
       const found = paged(workspace.projects.map(({ id, title, brief, updatedAt }) => ({ id, title, brief, updatedAt })), args);
@@ -253,11 +282,29 @@ export function createMcpServer(options = {}) {
       entity(workspace, 'projects', args.projectId);
       return { revision, creativeDirections: workspace.boards.filter(board => board.projectId === args.projectId).map(board => exportCreativeDirection(workspace, board.id)) };
     }
-    if (name === 'create_reference') return mutate(args, value => {
-      const next = createReference(value, { ...args, captureMethod: args.captureMethod || 'mcp-agent' });
-      const id = next.references.at(-1).id;
-      return { workspace: next, entity: saved => entity(saved, 'references', id) };
-    });
+    if (name === 'create_reference') {
+      let effectiveCapture;
+      const created = await mutate(args, value => {
+        effectiveCapture = args.capture ?? value.settings.automaticWebsiteCapture;
+        const next = createReference(value, { ...args, captureMethod: args.captureMethod || 'mcp-agent' });
+        const id = next.references.at(-1).id;
+        return { workspace: next, entity: saved => entity(saved, 'references', id) };
+      });
+      if (!created.entity.sourceUrl) {
+        return { ...created, capture: { status: 'skipped', reason: 'no_source_url' } };
+      }
+      if (!effectiveCapture) {
+        return {
+          ...created,
+          capture: { status: 'skipped', reason: args.capture === false ? 'explicit_opt_out' : 'workspace_default' }
+        };
+      }
+      const scheduled = captureScheduler.enqueue(created.entity.id);
+      if (scheduled.accepted) {
+        captureScheduler.wait(created.entity.id)?.then(captureDiagnostic).catch(() => {});
+      }
+      return { ...created, capture: scheduled.outcome };
+    }
     if (name === 'enrich_reference') return mutate(args, value => {
       const changes = Object.fromEntries(['title', 'sourceUrl', 'creator', 'notes'].filter(key => key in args).map(key => [key, args[key]]));
       if (!Object.keys(changes).length) fail('INVALID_ARGUMENT', 'At least one enrichment field is required');

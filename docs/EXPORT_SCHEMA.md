@@ -101,7 +101,8 @@ This restore format contains:
 
 - `format`: exactly `refloom.workspace-backup`.
 - `version`: exactly `2`.
-- `workspace`: workspace version 1 with arrays named `projects`, `references`,
+- `workspace`: workspace version 1 with boolean
+  `settings.automaticWebsiteCapture` and arrays named `projects`, `references`,
   `assets`, `targets`, `moments`, `selections`, `boards`, and `signals`.
 - `binaries`: records with exactly `id`, MIME `type`, original `name`, byte
   `size`, lowercase `sha256`, and canonical base64 `data`. Every asset locator
@@ -113,6 +114,9 @@ This restore format contains:
   "version": 2,
   "workspace": {
     "version": 1,
+    "settings": {
+      "automaticWebsiteCapture": true
+    },
     "projects": [],
     "references": [],
     "assets": [],

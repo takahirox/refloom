@@ -141,13 +141,15 @@ export function decodeBackup(text) {
 export class WorkspaceRepository {
   constructor(fetcher = globalThis.fetch?.bind(globalThis)) { this.fetcher = fetcher; this.revision = undefined; }
 
-  async #request(path, options = {}) {
+  async #request(path, options = {}, acceptedStatuses = []) {
     if (!this.fetcher) throw new StorageUnavailableError();
     let response;
     try { response = await this.fetcher(path, options); }
     catch (error) { throw new StorageUnavailableError(`Could not reach the Refloom workspace service: ${error.message}`); }
-    if (response.status === 409) throw new RevisionConflictError();
-    if (!response.ok) {
+    if (response.status === 409 && !acceptedStatuses.includes(409)) {
+      throw new RevisionConflictError();
+    }
+    if (!response.ok && !acceptedStatuses.includes(response.status)) {
       let detail;
       try { detail = (await response.json()).error; } catch { detail = response.statusText; }
       throw new StorageUnavailableError(detail || `Workspace service returned HTTP ${response.status}`);
@@ -167,20 +169,38 @@ export class WorkspaceRepository {
     const response = await this.#request('/api/captures', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ referenceId, settings })
-    });
+    }, [400, 409, 429, 502]);
     return response.json();
   }
 
-  async mutate(workspace, additions = []) {
+  async captureStatus(referenceId) {
+    return (await this.#request(
+      `/api/captures/${encodeURIComponent(referenceId)}/status`
+    )).json();
+  }
+
+  async cancelCapture(referenceId) {
+    return (await this.#request(
+      `/api/captures/${encodeURIComponent(referenceId)}/status`, { method: 'DELETE' }
+    )).json();
+  }
+
+  async mutate(workspace, additions = [], options = {}) {
     validateWorkspace(workspace);
+    if (!options || typeof options !== 'object' || Array.isArray(options)
+      || Object.keys(options).some(key => key !== 'capture' && key !== 'captureSettings')
+      || (options.capture !== undefined && typeof options.capture !== 'boolean')) {
+      throw new TypeError('Workspace mutation options are invalid');
+    }
     const binaries = [];
     for (const item of additions) {
       if (!item || typeof item.id !== 'string' || !(item.blob instanceof Blob)) throw new TypeError('Binary addition requires an id and Blob');
       binaries.push({ id: item.id, name: item.name || '', type: item.blob.type, data: await blobToBase64(item.blob) });
     }
     try {
-      const value = await (await this.#request('/api/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: this.revision, workspace, binaries }) })).json();
+      const value = await (await this.#request('/api/workspace', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: this.revision, workspace, binaries, ...options }) })).json();
       this.revision = value.revision;
+      return value;
     } catch (error) {
       if (error instanceof RevisionConflictError) await this.load();
       throw error;

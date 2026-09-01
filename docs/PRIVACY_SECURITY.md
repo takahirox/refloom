@@ -73,9 +73,12 @@ confirmation.
 
 ## Website capture
 
-Website capture is opt-in and is an open-world network action. The UI and MCP
-can request it only for an existing Reference; neither surface can override its
-stored URL, browser executable, proxy, or process dependencies. Capture modules
+Website capture is an open-world network action. One initial capture is visibly
+default-on for a newly saved website Reference, with per-create and shared
+Workspace opt-out controls; later capture remains explicit. The URL Reference
+is committed before the network action. The UI and MCP can capture only an
+existing Reference; neither surface can override its stored URL, browser
+executable, proxy, or process dependencies. Capture modules
 treat pages and DNS as hostile, reject non-public destinations, pin every
 validated proxy connection, and run Chrome with fresh temporary state and
 bounded resources. Redirects and subresources traverse the same proxy boundary.

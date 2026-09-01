@@ -20,13 +20,27 @@ export function normalizeCaptureRequest(value) {
 
 export function publicCaptureResult(result) {
   const status = result?.status;
-  if (status !== 'complete' && status !== 'partial') return { status: status || 'failed' };
+  if (status === 'queued' || status === 'capturing' || status === 'idle') return { status };
+  if (status === 'skipped') {
+    return { status, ...(typeof result.reason === 'string' ? { reason: result.reason } : {}) };
+  }
+  if (status !== 'complete' && status !== 'partial' && status !== 'cancelled') {
+    const allowed = new Set([
+      'CAPTURE_BUSY', 'CAPTURE_QUEUE_FULL', 'CAPTURE_FAILED',
+      'INVALID_REFERENCE', 'INVALID_SETTINGS'
+    ]);
+    return {
+      status: status || 'failed',
+      ...(allowed.has(result?.error) ? { code: result.error } : {})
+    };
+  }
   return {
     status,
     captured: Array.isArray(result.captured) ? result.captured.map(item => ({
       assetId: item.assetId,
       targetId: item.targetId,
       momentId: item.momentId
-    })) : []
+    })) : [],
+    ...(status === 'cancelled' ? { code: 'CAPTURE_CANCELLED' } : {})
   };
 }

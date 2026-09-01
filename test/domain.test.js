@@ -4,7 +4,8 @@ import {
   ValidationError, createWorkspace, createProject, updateProject, createReference,
   createAsset, createTarget, createMoment, createSelection, createBoard, reorderBoard,
   removeFromBoard, recordSignal, deleteReference, deleteProject, exportCreativeDirection,
-  exportBoardMarkdown, exportWorkspace, importWorkspace, validateWorkspace
+  exportBoardMarkdown, exportWorkspace, importWorkspace, validateWorkspace,
+  updateWorkspaceSettings
 } from '../src/domain.js';
 
 function fixture() {
@@ -27,6 +28,19 @@ test('create and update operations return new workspaces without mutating input'
   assert.equal(created.projects[0].title, 'One');
   assert.equal(updated.projects[0].title, 'Two');
   assert.notEqual(updated, created);
+});
+
+test('website capture defaults on, is immutable, and upgrades legacy workspaces', () => {
+  const original = createWorkspace();
+  assert.deepEqual(original.settings, { automaticWebsiteCapture: true });
+  const disabled = updateWorkspaceSettings(original, { automaticWebsiteCapture: false });
+  assert.equal(disabled.settings.automaticWebsiteCapture, false);
+  assert.equal(original.settings.automaticWebsiteCapture, true);
+  assert.throws(() => updateWorkspaceSettings(original, { unknown: true }), /invalid/);
+
+  const legacy = structuredClone(original);
+  delete legacy.settings;
+  assert.deepEqual(importWorkspace(legacy).settings, { automaticWebsiteCapture: true });
 });
 
 test('selection preserves reference, asset target, moment, aspect, and intent precision', () => {

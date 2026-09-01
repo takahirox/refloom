@@ -35,6 +35,31 @@ the generic `CAPTURE_FAILED` boundary error. A stable `BROWSER_UNAVAILABLE`,
 to stderr, without executable/profile paths or captured URLs. Host-process runs
 may set `REFLOOM_CHROME_PATH`; MCP callers cannot override it.
 
+## Default-on initial capture
+
+Saving a website URL from the UI queues one initial capture by default. The
+control is visible before saving and can be unchecked for that Reference. A
+shared Workspace preference changes the visible default, while a one-off choice
+still wins. Refloom commits the URL Reference before it asks the scheduler to
+open the page, so `queued`, `capturing`, `complete`, `partial`, `failed`,
+`cancelled`, and explicitly skipped outcomes never roll back the saved URL.
+
+MCP `create_reference` follows the same rule when `sourceUrl` is present. Pass
+`capture: false` to opt out, poll `get_capture_status`, and use
+`cancel_website_capture` when needed. The creation response separates its
+successful `revision`/`entity` from the capture state. Capture failure is not a
+failed Reference mutation.
+
+The runtime scheduler starts at most one Chromium capture at a time and accepts
+at most eight queued jobs per server/MCP process. Further work returns
+`CAPTURE_QUEUE_FULL`; duplicate active work returns `CAPTURE_BUSY`. Cancellation
+aborts running browser cleanup and preserves checkpoints already committed.
+These limits prevent a burst of UI or agent writes from creating an unbounded
+number of browser processes.
+
+Only initial creation is default-on. Editing a URL, recapturing, periodic
+monitoring, video, and scripted interaction remain explicit operations.
+
 ## Security invariants
 
 - Only fragment-free `http` URLs on port 80 and `https` URLs on port 443 are
@@ -103,8 +128,10 @@ render elsewhere. Public destinations can themselves proxy traffic or return
 sensitive content available to the operator. IP classification and known Chrome
 paths require maintenance as platforms evolve.
 
-The UI never fetches a saved URL unless the user opts in or presses Capture.
-The HTTP and MCP surfaces accept only an existing Reference ID and the bounded
+The UI visibly defaults initial capture on when a website URL is saved; the
+user can opt out before saving or disable the shared Workspace default. Later
+fetches still require an explicit Capture action. The HTTP and MCP capture
+surfaces accept only an existing Reference ID and the bounded
 viewport/checkpoint/readiness settings; they cannot supply a URL, executable,
 proxy, filesystem path, or dependency override. The Reference source URL is
 always reloaded as authoritative input.

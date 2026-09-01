@@ -10,6 +10,7 @@ const ERROR = Object.freeze({
   BUSY: 'CAPTURE_BUSY',
   INVALID_REFERENCE: 'INVALID_REFERENCE',
   INVALID_SETTINGS: 'INVALID_SETTINGS',
+  CANCELLED: 'CAPTURE_CANCELLED',
   FAILED: 'CAPTURE_FAILED'
 });
 
@@ -89,6 +90,7 @@ export async function captureReference(store, referenceId, settings = {}, depend
     const summary = await driver(source.href, {
       ...settings,
       ...(dependencies.captureOptions || {}),
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
       onScreenshot: async screenshot => {
         const entityIds = ids(randomUUID);
         for (let attempt = 0; ; attempt += 1) {
@@ -112,6 +114,9 @@ export async function captureReference(store, referenceId, settings = {}, depend
     });
     return { status: 'complete', captured, summary };
   } catch (error) {
+    if (dependencies.signal?.aborted) {
+      return { status: 'cancelled', captured, error: ERROR.CANCELLED };
+    }
     return failed(ERROR.FAILED, captured, captureDiagnosticCode(error));
   } finally {
     activeReferences.delete(referenceId);

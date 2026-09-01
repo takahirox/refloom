@@ -43,9 +43,11 @@ useful non-AI path.
 Agent and capture capabilities are bounded adapters around this core. They use
 explicit, narrow operations; progressively disclose data; preserve revision and
 provenance constraints; and do not gain arbitrary filesystem, destructive, or
-workspace-replacement authority. Open-world website capture is opt-in, accepts
-an existing Reference rather than an arbitrary request URL, and is constrained
-by documented network and resource limits.
+workspace-replacement authority. Initial open-world website capture is visibly
+default-on with per-create and shared-Workspace opt-out controls. It runs only
+after a URL Reference is committed, accepts that existing Reference rather than
+an arbitrary request URL, and is constrained by documented network, queue, and
+resource limits. Later or repeated capture remains explicit.
 
 ## Current 0.1 behavior
 

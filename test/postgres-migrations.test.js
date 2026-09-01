@@ -139,3 +139,10 @@ test('the committed migration defines all normalized tables and required constra
   assert.match(sql, /unique \(board_id, position\)/);
   assert.match(sql, /sha256 ~ '\^\[0-9a-f\]\{64\}\$'/);
 });
+
+test('capture settings migration adds a non-null JSON object with default-on behavior', async () => {
+  const sql = await readFile(new URL('../migrations/0002_workspace_capture_settings.sql', import.meta.url), 'utf8');
+  assert.match(sql, /add column settings jsonb not null/);
+  assert.match(sql, /"automaticWebsiteCapture": true/);
+  assert.match(sql, /jsonb_typeof\(settings\) = 'object'/);
+});

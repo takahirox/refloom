@@ -115,7 +115,9 @@ test('load rolls back and releases a failed snapshot', async () => {
   assert.equal(pool.released, true);
 });
 
-function commitPool({ actual = 0, failDelete = false, retained = [] } = {}) {
+function commitPool({
+  actual = 0, failDelete = false, retained = [], existingReferenceIds = []
+} = {}) {
   const sets = emptyRows();
   return new FakePool((text, values, client) => {
     if (text.includes('from media_objects where id = any')) return { rows: retained };
@@ -124,6 +126,9 @@ function commitPool({ actual = 0, failDelete = false, retained = [] } = {}) {
     }
     if (text === 'select revision from workspace_state where singleton = true for update') {
       return { rows: [{ revision: actual }] };
+    }
+    if (text === 'select id from "references"') {
+      return { rows: existingReferenceIds.map(id => ({ id })) };
     }
     if (failDelete && client && text === 'delete from signals') throw new Error('database URL secret');
     if (text.startsWith('select revision')) return { rows: [{ revision: actual + 1 }] };
@@ -138,15 +143,38 @@ test('commit verifies upload before BEGIN, locks before replacement, and commits
   const pool = commitPool();
   const mediaStore = new FakeMediaStore();
   const repository = new PostgresWorkspaceRepository({ pool, mediaStore });
-  const result = await repository.commit(0, createWorkspace(), []);
+  let workspace = createProject(createWorkspace(), { id: 'p', title: 'Project' });
+  workspace = createReference(workspace, {
+    id: 'r', projectId: 'p', captureMethod: 'url', sourceUrl: 'https://example.com'
+  });
+  const result = await repository.commit(0, workspace, []);
   assert.equal(result.revision, 1);
+  assert.deepEqual(result.createdReferenceIds, ['r']);
   const texts = pool.queries.map(item => item.text);
   const begin = texts.indexOf('begin isolation level read committed');
   const lock = texts.indexOf('select revision from workspace_state where singleton = true for update');
   const firstDelete = texts.indexOf('delete from signals');
   assert.ok(begin >= 0 && begin < lock && lock < firstDelete);
+  assert.ok(texts.indexOf('select id from "references"') > lock);
   assert.ok(texts.indexOf('commit') > texts.findIndex(text => text.startsWith('update workspace_state')));
   assert.equal(mediaStore.calls[0][0], 'put');
+});
+
+test('commit reports only References created against the locked revision', async () => {
+  const pool = commitPool({ existingReferenceIds: ['existing'] });
+  const repository = new PostgresWorkspaceRepository({
+    pool, mediaStore: new FakeMediaStore()
+  });
+  let workspace = createProject(createWorkspace(), { id: 'p', title: 'Project' });
+  workspace = createReference(workspace, {
+    id: 'existing', projectId: 'p', captureMethod: 'url',
+    sourceUrl: 'https://example.com'
+  });
+  workspace = createReference(workspace, {
+    id: 'new', projectId: 'p', captureMethod: 'url',
+    sourceUrl: 'https://example.org'
+  });
+  assert.deepEqual((await repository.commit(0, workspace, [])).createdReferenceIds, ['new']);
 });
 
 test('stale conflict rolls back before replacing rows', async () => {
@@ -274,7 +302,7 @@ test('backup export captures one snapshot then fetches verified objects as backu
   assert.equal(metadataQuery.text.includes('blob_1'), false);
   assert.ok(pool.queries.every(item => item.client));
   assert.ok(events.indexOf('begin isolation level repeatable read read only')
-    < events.indexOf('select revision from workspace_state where singleton = true'));
+    < events.indexOf('select revision, settings from workspace_state where singleton = true'));
   assert.ok(events.indexOf('commit') < events.indexOf('s3:get'));
   assert.equal(pool.released, true);
   assert.deepEqual(mediaStore.calls[0], ['get', {

@@ -59,10 +59,13 @@ async function rowSets(connection) {
 
 async function loaded(connection, locked = false) {
   const state = await connection.query(
-    `select revision from workspace_state where singleton = true${locked ? ' for update' : ''}`
+    `select revision, settings from workspace_state where singleton = true${locked ? ' for update' : ''}`
   );
   if (state.rows.length !== 1) throw new PersistenceError('Workspace state is unavailable');
-  return { revision: revision(state.rows[0].revision), workspace: rowsToWorkspace(await rowSets(connection)) };
+  return {
+    revision: revision(state.rows[0].revision),
+    workspace: rowsToWorkspace(await rowSets(connection), state.rows[0].settings)
+  };
 }
 
 export class PostgresWorkspaceRepository extends PersistenceRepository {
@@ -93,7 +96,7 @@ export class PostgresWorkspaceRepository extends PersistenceRepository {
     try {
       await this.pool.query('select 1');
       const state = await this.pool.query(
-        'select revision from workspace_state where singleton = true'
+        'select revision, settings from workspace_state where singleton = true'
       );
       if (state.rows.length !== 1) throw new PersistenceError('Workspace state is unavailable');
       await this.mediaStore.readiness();
@@ -151,6 +154,12 @@ export class PostgresWorkspaceRepository extends PersistenceRepository {
       if (current.rows.length !== 1) throw new PersistenceError('Workspace state is unavailable');
       const actual = revision(current.rows[0].revision);
       if (actual !== expected) throw new RevisionConflictError(expected, actual);
+      const existingReferenceIds = new Set((await client.query(
+        'select id from "references"'
+      )).rows.map(item => item.id));
+      const createdReferenceIds = value.references
+        .filter(item => !existingReferenceIds.has(item.id))
+        .map(item => item.id);
 
       for (const table of DELETE_ORDER) await client.query(`delete from ${tableName(table)}`);
       const rows = workspaceToRows(value);
@@ -183,13 +192,14 @@ export class PostgresWorkspaceRepository extends PersistenceRepository {
       );
       const next = actual + 1;
       await client.query(
-        'update workspace_state set revision = $1 where singleton = true', [next]
+        'update workspace_state set revision = $1, settings = $2 where singleton = true',
+        [next, value.settings]
       );
       const reconstructed = await loaded(client);
       if (reconstructed.revision !== next) throw new PersistenceError('Workspace revision update failed');
       await client.query('commit');
       transaction = false;
-      return reconstructed;
+      return { ...reconstructed, createdReferenceIds };
     } catch (error) {
       if (transaction) {
         try { await client.query('rollback'); } catch {}

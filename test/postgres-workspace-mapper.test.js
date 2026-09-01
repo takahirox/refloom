@@ -10,6 +10,7 @@ import {
   createTarget,
   createWorkspace,
   recordSignal,
+  updateWorkspaceSettings,
   ValidationError
 } from '../src/domain.js';
 import {
@@ -54,7 +55,9 @@ function completeWorkspace() {
 }
 
 test('maps every workspace collection and field and round-trips board order', () => {
-  const workspace = completeWorkspace();
+  const workspace = updateWorkspaceSettings(completeWorkspace(), {
+    automaticWebsiteCapture: false
+  });
   const rows = workspaceToRows(workspace);
 
   assert.deepEqual(Object.keys(rows), INSERT_ORDER);
@@ -66,7 +69,7 @@ test('maps every workspace collection and field and round-trips board order', ()
   assert.equal(rows.moments[0].end_value, 2.5);
   assert.deepEqual(rows.signals[0].subject_type, 'reference');
   assert.deepEqual(rows.signals[0].subject_id, 'reference-1');
-  assert.deepEqual(rowsToWorkspace(rows), workspace);
+  assert.deepEqual(rowsToWorkspace(rows, workspace.settings), workspace);
 });
 
 test('converts SQL null to omitted optional properties and Date values to canonical ISO strings', () => {
