@@ -5,7 +5,9 @@ import {
   updateWorkspaceSettings
 } from './domain.js';
 import { BLOB_PREFIX, RevisionConflictError, WorkspaceRepository, blobIdFromLocator } from './storage.js';
-import { displayReference, formatMoment, formatSignal, safeFilename } from './ui-format.js';
+import {
+  displayReference, formatMoment, formatSignal, safeExternalWebsiteUrl, safeFilename
+} from './ui-format.js';
 
 const $ = selector => document.querySelector(selector);
 const repository = new WorkspaceRepository();
@@ -305,6 +307,12 @@ async function renderLibrary() {
     edit.addEventListener('click', () => referenceEditor(reference));
     const add = element('button', { type: 'button', text: 'Add assets' });
     add.addEventListener('click', () => { $('#file-input').dataset.referenceId = reference.id; $('#file-input').click(); });
+    const websiteUrl = safeExternalWebsiteUrl(reference.sourceUrl);
+    const visitWebsite = websiteUrl ? element('a', {
+      className: 'button', href: websiteUrl, target: '_blank', rel: 'noopener noreferrer',
+      'aria-label': `Visit ${displayReference(reference)} website (opens in a new tab)`,
+      text: 'Visit website'
+    }) : null;
     const websiteCapture = reference.sourceUrl ? element('button', { type: 'button', text: assets.some(asset => asset.provenance?.captureStrategy) ? 'Recapture website' : 'Capture website' }) : null;
     websiteCapture?.addEventListener('click', () => captureWebsite(reference.id, {
       width: 1440, height: 900, checkpoints: 3, readinessMs: 1000, settleMs: 500, maxRedirects: 10
@@ -341,7 +349,7 @@ async function renderLibrary() {
       element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
       captureStatus,
       reference.notes ? element('p', { text: reference.notes }) : null,
-      element('div', { className: 'actions' }, [edit, add, websiteCapture, cancelCapture, select, remove])
+      element('div', { className: 'actions' }, [visitWebsite, edit, add, websiteCapture, cancelCapture, select, remove])
     ]);
     cards.push(card);
   }

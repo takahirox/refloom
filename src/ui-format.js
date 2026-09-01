@@ -2,6 +2,16 @@ export function displayReference(reference) {
   return reference.title || reference.sourceUrl || 'Untitled reference';
 }
 
+export function safeExternalWebsiteUrl(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function formatMoment(moment) {
   if (!moment) return '';
   if (moment.label) return moment.label;
