@@ -111,7 +111,9 @@ test('supports injected configuration and cleanup values for fake-only construct
   });
 
   assert.equal(calls[0][2].connectionString, config.databaseUrl);
-  assert.equal(calls[1][2].credentials, config.s3.credentials);
+  assert.deepEqual(calls[1][2].credentials, config.s3.credentials);
+  assert.notEqual(calls[1][2].credentials, config.s3.credentials);
+  assert.equal(Object.isFrozen(calls[1][2].credentials), false);
   assert.equal(calls[2][2].orphanGraceMs, 9);
   assert.equal(calls[2][2].cleanupLimit, 8);
   assert.equal(result.cleanupIntervalMs, 7);

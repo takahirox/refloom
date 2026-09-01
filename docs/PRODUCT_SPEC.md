@@ -62,8 +62,9 @@ add compatibility and data-loss risk without a requested user-facing migration
 outcome. The documentation change for Issue #2 does not refactor the version-1
 domain or migrate data.
 
-The authoritative 0.1 workspace and media are held by the revisioned local file
-store. IndexedDB is read-only legacy migration input. Version 0.1 also includes
+The authoritative 0.1 workspace is held in normalized PostgreSQL tables and
+media in a private S3-compatible bucket, coordinated by one revision row. The
+browser has no authoritative persistence or legacy reader. Version 0.1 also includes
 bounded website screenshot capture and a bounded local stdio MCP interface.
 These are implemented capabilities, not claims that richer experience capture
 or general agent autonomy is complete.
@@ -72,12 +73,12 @@ or general agent autonomy is complete.
 
 These boundaries are separate contracts and must not share an implied version:
 
-- **Persistence envelope**: the revisioned on-disk workspace and registered
-  media used by `FileWorkspaceStore`. It is authoritative runtime state and may
-  contain storage coordination metadata not intended as interchange.
+- **Persistence schema**: deterministic SQL migrations, normalized entity rows,
+  the global revision, and registered media metadata. It is authoritative
+  runtime state and is not a portable interchange format.
 - **`refloom.workspace-backup`**: the portable, complete restore expression for
   a supported workspace version, including referenced media. Import validates
-  it and replaces local state only after confirmation.
+  it and replaces authoritative state only after confirmation.
 - **`refloom.creative-direction`**: the portable, board-scoped expression of
   direction. It deliberately omits unrelated workspace entities and binary
   media and is not restorable as a workspace.

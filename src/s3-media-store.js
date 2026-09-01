@@ -110,7 +110,8 @@ export class S3MediaStore {
         if (created) {
           const deleted = await this.client.send(new DeleteObjectsCommand({
             Bucket: this.bucket,
-            Delete: { Objects: [{ Key: item.key }], Quiet: true }
+            Delete: { Objects: [{ Key: item.key }], Quiet: true },
+            ChecksumAlgorithm: 'MD5'
           }));
           if (deleted.Errors?.length) throw new Error('Readiness object could not be deleted');
         }
@@ -285,7 +286,8 @@ export class S3MediaStore {
         try {
           const response = await this.client.send(new DeleteObjectsCommand({
             Bucket: this.bucket,
-            Delete: { Objects, Quiet: true }
+            Delete: { Objects, Quiet: true },
+            ChecksumAlgorithm: 'MD5'
           }));
           for (const error of response.Errors ?? []) {
             failures.push({ key: error.Key, code: error.Code ?? 'DELETE_FAILED' });

@@ -207,8 +207,10 @@ test('cleanup is prefix, grace, limit, and reference safe', async () => {
     Bucket: 'private-bucket', Prefix: 'media/', MaxKeys: 3
   });
   assert.ok(client.commands[1] instanceof DeleteObjectsCommand);
-  assert.deepEqual(client.commands[1].input.Delete, {
-    Objects: [{ Key: 'media/orphan' }], Quiet: true
+  assert.deepEqual(client.commands[1].input, {
+    Bucket: 'private-bucket',
+    Delete: { Objects: [{ Key: 'media/orphan' }], Quiet: true },
+    ChecksumAlgorithm: 'MD5'
   });
 });
 

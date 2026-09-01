@@ -238,7 +238,7 @@ test('backup export captures one snapshot then fetches verified objects as backu
       id: 'p', title: 'Project', brief: null,
       created_at: workspace.projects[0].createdAt, updated_at: workspace.projects[0].updatedAt
     }] };
-    if (text.startsWith('select * from references')) return { rows: [{
+    if (text.startsWith('select * from "references"')) return { rows: [{
       id: 'r', project_id: 'p', title: null, source_url: null, creator: null, notes: null,
       captured_at: workspace.references[0].capturedAt, capture_method: 'manual',
       created_at: workspace.references[0].createdAt, updated_at: workspace.references[0].updatedAt
@@ -288,7 +288,8 @@ test('backup export rolls back missing metadata without fetching S3', async () =
   const pool = new FakePool(text => {
     if (text.startsWith('select revision')) return { rows: [{ revision: 3 }] };
     for (const [table, tableRows] of Object.entries(rows)) {
-      if (text.startsWith(`select * from ${table}`)) return { rows: tableRows };
+      const sqlTable = table === 'references' ? '"references"' : table;
+      if (text.startsWith(`select * from ${sqlTable}`)) return { rows: tableRows };
     }
     return { rows: [] };
   });
@@ -307,7 +308,8 @@ test('backup export propagates verified S3 failure after committing snapshot', a
   const pool = new FakePool(text => {
     if (text.startsWith('select revision')) return { rows: [{ revision: 3 }] };
     for (const [table, tableRows] of Object.entries(rows)) {
-      if (text.startsWith(`select * from ${table}`)) return { rows: tableRows };
+      const sqlTable = table === 'references' ? '"references"' : table;
+      if (text.startsWith(`select * from ${sqlTable}`)) return { rows: tableRows };
     }
     if (text.includes('from media_objects where id = any')) return { rows: [{
       id: 'blob_1', sha256: 'a'.repeat(64), size_bytes: 5,

@@ -12,7 +12,7 @@ create table projects (
   updated_at timestamptz not null
 );
 
-create table references (
+create table "references" (
   id text primary key,
   project_id text not null references projects(id) on delete cascade,
   title text,
@@ -29,7 +29,7 @@ create table references (
 create table assets (
   id text primary key,
   project_id text not null references projects(id) on delete cascade,
-  reference_id text not null references references(id) on delete cascade,
+  reference_id text not null references "references"(id) on delete cascade,
   kind text not null check (kind in ('image', 'video', 'url')),
   locator text not null,
   media_type text,
@@ -38,20 +38,20 @@ create table assets (
   created_at timestamptz not null,
   updated_at timestamptz not null,
   unique (id, reference_id),
-  foreign key (reference_id, project_id) references references(id, project_id)
+  foreign key (reference_id, project_id) references "references"(id, project_id)
 );
 
 create table targets (
   id text primary key,
   project_id text not null references projects(id) on delete cascade,
-  reference_id text not null references references(id) on delete cascade,
+  reference_id text not null references "references"(id) on delete cascade,
   asset_id text,
   kind text not null check (kind in ('reference', 'asset', 'region', 'frame', 'interaction')),
   detail jsonb not null,
   created_at timestamptz not null,
   updated_at timestamptz not null,
   unique (id, project_id),
-  foreign key (reference_id, project_id) references references(id, project_id),
+  foreign key (reference_id, project_id) references "references"(id, project_id),
   foreign key (asset_id, reference_id) references assets(id, reference_id),
   check (kind <> 'asset' or asset_id is not null)
 );
@@ -123,8 +123,8 @@ create table media_objects (
   created_at timestamptz not null
 );
 
-create index references_project_id_idx on references (project_id);
-create index references_project_updated_idx on references (project_id, updated_at);
+create index references_project_id_idx on "references" (project_id);
+create index references_project_updated_idx on "references" (project_id, updated_at);
 create index assets_project_id_idx on assets (project_id);
 create index assets_reference_id_idx on assets (reference_id);
 create index targets_project_id_idx on targets (project_id);

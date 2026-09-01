@@ -4,8 +4,8 @@ Refloom 0.1 emits two portable JSON formats. Consumers must check both `format` 
 `version` before reading the rest of a document. Timestamps are ISO 8601 strings;
 identifiers are opaque strings and must not be parsed for meaning.
 
-These formats are independent of both the revisioned on-disk persistence
-envelope and the live MCP protocol/tool/resource contract. Their versions may
+These formats are independent of both the PostgreSQL/S3 persistence schema and
+the live MCP protocol/tool/resource contract. Their versions may
 advance separately. MCP is not a backup: its bounded operational reads do not
 constitute an atomic, complete, restorable workspace and its mutation surface
 does not expose backup replacement.
@@ -95,22 +95,22 @@ Example (timestamps and optional fields are representative):
 This is a direction artifact, not a restorable workspace: entities unrelated to
 the selected board and captured binary bytes are intentionally absent.
 
-## `refloom.workspace-backup` version 1
+## `refloom.workspace-backup` version 2
 
 This restore format contains:
 
 - `format`: exactly `refloom.workspace-backup`.
-- `version`: exactly `1`.
+- `version`: exactly `2`.
 - `workspace`: workspace version 1 with arrays named `projects`, `references`,
   `assets`, `targets`, `moments`, `selections`, `boards`, and `signals`.
-- `binaries`: records with `id`, MIME `type`, original `name` when available,
-  and base64 `data`. Every asset locator `blob:<id>` must have one matching
-  binary record.
+- `binaries`: records with exactly `id`, MIME `type`, original `name`, byte
+  `size`, lowercase `sha256`, and canonical base64 `data`. Every asset locator
+  `blob:<id>` must have one matching binary record and no orphan is allowed.
 
 ```json
 {
   "format": "refloom.workspace-backup",
-  "version": 1,
+  "version": 2,
   "workspace": {
     "version": 1,
     "projects": [],
@@ -127,28 +127,31 @@ This restore format contains:
       "id": "media_demo",
       "type": "image/png",
       "name": "reference.png",
-      "data": "iVBORw0KGgo="
+      "size": 1,
+      "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+      "data": "AA=="
     }
   ]
 }
 ```
 
-The minimal example's binary is unreferenced and is discarded on import. Real
-backups include only binaries referenced by workspace assets.
+The minimal workspace above must include a matching blob-backed Asset before it
+can be imported; the binary is shown only to document the record shape.
 
 ## Compatibility rules
 
-- Version 1 readers must accept optional entity fields being absent and must
+- Version 2 readers must accept optional entity fields being absent and must
   preserve fields they understand without deriving missing provenance.
 - Refloom validates relationship integrity and rejects malformed JSON,
   unsupported format/version pairs, duplicate IDs, dangling relationships,
   corrupt binary records, and missing referenced binaries.
-- The current importer does not migrate future versions. Producers introducing
+- Backup version 1, unknown versions, raw workspace JSON, and old file envelopes
+  are rejected. There is no automatic browser/file-store migration. Producers introducing
   an incompatible shape must increment the relevant version; format names do
   not change for compatible revisions.
 - Consumers should ignore unknown additive fields, but must not interpret that
   as permission to accept an unknown version.
-- Importing a valid backup replaces the current local workspace. Direction JSON
+- Importing a valid backup replaces the current authoritative workspace. Direction JSON
   cannot be imported as a backup.
 - Version 1 accurately retains project-owned References. A future move to
   workspace-level reusable References requires a new workspace/domain major

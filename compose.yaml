@@ -1,0 +1,104 @@
+services:
+  postgres:
+    image: postgres:17.11-alpine3.24
+    environment:
+      POSTGRES_DB: refloom
+      POSTGRES_USER: refloom
+      POSTGRES_PASSWORD: refloom-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U refloom -d refloom"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [private]
+
+  object-store:
+    image: minio/minio:RELEASE.2025-10-15T17-29-55Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: refloom
+      MINIO_ROOT_PASSWORD: refloom-internal-secret
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    volumes:
+      - object-data:/data
+    networks: [private]
+
+  bucket-init:
+    build: .
+    depends_on:
+      object-store:
+        condition: service_healthy
+    environment:
+      REFLOOM_S3_ENDPOINT: http://object-store:9000
+      REFLOOM_S3_REGION: us-east-1
+      REFLOOM_S3_BUCKET: refloom
+      REFLOOM_S3_ACCESS_KEY_ID: refloom
+      REFLOOM_S3_SECRET_ACCESS_KEY: refloom-internal-secret
+      REFLOOM_S3_FORCE_PATH_STYLE: "true"
+    command: ["node", "scripts/init-bucket.mjs"]
+    restart: "no"
+    networks: [private]
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      object-store:
+        condition: service_healthy
+      bucket-init:
+        condition: service_completed_successfully
+    environment: &app-environment
+      HOST: 0.0.0.0
+      PORT: 4173
+      DATABASE_URL: postgresql://refloom:refloom-internal@postgres:5432/refloom
+      REFLOOM_S3_ENDPOINT: http://object-store:9000
+      REFLOOM_S3_REGION: us-east-1
+      REFLOOM_S3_BUCKET: refloom
+      REFLOOM_S3_ACCESS_KEY_ID: refloom
+      REFLOOM_S3_SECRET_ACCESS_KEY: refloom-internal-secret
+      REFLOOM_S3_FORCE_PATH_STYLE: "true"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4173:4173"
+    networks: [private]
+
+  integration:
+    build: .
+    profiles: [integration]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      object-store:
+        condition: service_healthy
+      bucket-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-environment
+      REFLOOM_MEDIA_ORPHAN_GRACE_MS: "0"
+    command: ["node", "--test", "test/integration/persistence.integration.test.js"]
+    volumes:
+      - ./test/integration:/app/test/integration:ro
+    restart: "no"
+    networks: [private]
+
+volumes:
+  postgres-data:
+  object-data:
+
+networks:
+  private:
+    internal: true

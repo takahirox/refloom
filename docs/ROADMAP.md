@@ -16,8 +16,8 @@ are finite implementation or research work, so closing Issues #1, #2, #3, or
 - Project boards with ordering, aspect filtering/grouping, and removal.
 - Human-readable Markdown and versioned creative-direction JSON export.
 - Factual activity signals without stored preference inference.
-- Revisioned local file persistence and media lifecycle, read-only migration
-  from legacy IndexedDB, validated full backup/import, and cascade deletion.
+- Normalized PostgreSQL persistence, private verified S3 media lifecycle, one
+  revision across HTTP/MCP/capture, backup version 2, and cascade deletion.
 - Keyboard-accessible responsive UI, safe text rendering, security headers,
   domain/storage tests, and HTTP contract tests.
 - Opt-in controlled-Chrome capture of bounded initial and deterministic scroll

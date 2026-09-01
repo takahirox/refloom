@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.mjs",
     "mcp": "node mcp-server.mjs",
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
+    "test:integration": "node scripts/test-integration.mjs",
+    "test:integration:container": "node --test test/integration/persistence.integration.test.js",
     "check": "node scripts/check.mjs"
   },
   "engines": {

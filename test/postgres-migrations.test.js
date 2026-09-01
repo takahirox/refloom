@@ -132,8 +132,8 @@ test('the committed migration defines all normalized tables and required constra
   for (const table of [
     'workspace_state', 'projects', 'references', 'assets', 'targets', 'moments',
     'selections', 'boards', 'board_selections', 'signals', 'media_objects'
-  ]) assert.match(sql, new RegExp(`create table ${table} \\(`));
-  assert.match(sql, /foreign key \(reference_id, project_id\) references references\(id, project_id\)/);
+  ]) assert.match(sql, new RegExp(`create table ${table === 'references' ? '"references"' : table} \\(`));
+  assert.match(sql, /foreign key \(reference_id, project_id\) references "references"\(id, project_id\)/);
   assert.match(sql, /foreign key \(asset_id, reference_id\) references assets\(id, reference_id\)/);
   assert.match(sql, /foreign key \(moment_id, target_id\) references moments\(id, target_id\)/);
   assert.match(sql, /unique \(board_id, position\)/);

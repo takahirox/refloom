@@ -18,7 +18,7 @@ import { decodeBackup, encodeBackup, referencedBlobIds } from './storage.js';
 
 const SELECTS = Object.freeze({
   projects: 'select * from projects',
-  references: 'select * from references',
+  references: 'select * from "references"',
   assets: 'select * from assets',
   targets: 'select * from targets',
   moments: 'select * from moments',
@@ -35,6 +35,7 @@ const REFERENCED_MEDIA = `select m.id, m.sha256, m.size_bytes, m.media_type, m.o
   from media_objects m
   where m.id = $1
     and exists (select 1 from assets a where a.locator = 'blob:' || m.id)`;
+const tableName = table => table === 'references' ? '"references"' : table;
 
 function revision(value) {
   const number = Number(value);
@@ -151,7 +152,7 @@ export class PostgresWorkspaceRepository extends PersistenceRepository {
       const actual = revision(current.rows[0].revision);
       if (actual !== expected) throw new RevisionConflictError(expected, actual);
 
-      for (const table of DELETE_ORDER) await client.query(`delete from ${table}`);
+      for (const table of DELETE_ORDER) await client.query(`delete from ${tableName(table)}`);
       const rows = workspaceToRows(value);
       for (const table of INSERT_ORDER) {
         const specification = INSERT_SPECIFICATIONS[table];

@@ -1,0 +1,28 @@
+# Test-only pins for the preloaded local images used by the integration runner.
+# Production startup uses compose.yaml without this override.
+services:
+  postgres:
+    image: postgres:16-alpine
+    pull_policy: never
+
+  object-store:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    pull_policy: never
+
+  bucket-init:
+    build:
+      context: .
+      args:
+        NODE_IMAGE: node:22-alpine
+
+  app:
+    build:
+      context: .
+      args:
+        NODE_IMAGE: node:22-alpine
+
+  integration:
+    build:
+      context: .
+      args:
+        NODE_IMAGE: node:22-alpine

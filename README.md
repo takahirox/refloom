@@ -1,6 +1,6 @@
 # Refloom
 
-Refloom 0.1 is a dependency-free, local-first workspace for turning visual and
+Refloom 0.1 is a local-first workspace for turning visual and
 interactive references into project-specific creative direction. It preserves
 the distinction between a source reference, the exact target or moment being
 used, the relevant aspect, and the creator's intent.
@@ -10,33 +10,41 @@ behavior are in [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md).
 
 ## Prerequisites
 
-- Node.js 22 or newer
+- Docker Desktop with Docker Compose (recommended), or Node.js 22+, PostgreSQL,
+  and a private S3-compatible object store
 - A current browser
 - Chrome or Chromium for optional automatic website capture
-
-No package installation, account, hosted backend, or AI provider is required.
 
 ## Run and verify
 
 ```sh
-npm start
+docker compose up --build
 ```
 
 Open `http://127.0.0.1:4173`. The server binds only to localhost by default.
-Set `PORT` to choose another port.
+PostgreSQL and object-store ports remain private inside the Compose network.
+The first startup creates the private bucket and applies checked SQL migrations.
+
+For a host-process development run, install packages and set `DATABASE_URL`,
+`REFLOOM_S3_ENDPOINT`, `REFLOOM_S3_REGION`, `REFLOOM_S3_BUCKET`,
+`REFLOOM_S3_ACCESS_KEY_ID`, and `REFLOOM_S3_SECRET_ACCESS_KEY` before `npm start`.
+`REFLOOM_S3_FORCE_PATH_STYLE` defaults to `true`. `GET /healthz` reports process
+liveness and `GET /readyz` verifies migrations, PostgreSQL, and bucket access.
 
 ```sh
 npm test
+npm run test:integration
 npm run check
 npm run mcp
 ```
 
-`npm test` runs the domain, storage, formatting, and HTTP integration tests.
+`npm test` is the fast suite. `npm run test:integration` creates isolated
+PostgreSQL/MinIO volumes, verifies the production path, and always removes them.
 
 ## Codex MCP setup
 
-Refloom includes a dependency-free local stdio MCP server. It shares the exact
-revisioned `FileWorkspaceStore` used by the browser and writes diagnostics only
+Refloom includes a local stdio MCP server. It shares the exact PostgreSQL
+revision and S3 media authority used by HTTP/capture and writes diagnostics only
 to stderr. Stop a manually started `npm run mcp` before asking Codex to launch
 its configured copy.
 
@@ -49,18 +57,17 @@ Codex configuration automatically:
 command = "node"
 args = ["/absolute/path/to/refloom/mcp-server.mjs"]
 cwd = "/absolute/path/to/refloom"
-env = { REFLOOM_DATA_DIR = "/absolute/path/to/refloom/data" }
+env = { DATABASE_URL = "postgresql://...", REFLOOM_S3_ENDPOINT = "http://...", REFLOOM_S3_REGION = "us-east-1", REFLOOM_S3_BUCKET = "refloom", REFLOOM_S3_ACCESS_KEY_ID = "...", REFLOOM_S3_SECRET_ACCESS_KEY = "...", REFLOOM_S3_FORCE_PATH_STYLE = "true" }
 ```
 
 Restart Codex in the project and approve/trust the project configuration when
 prompted. For a user-local installation, put the same table in
-`~/.codex/config.toml`; project configuration is preferable when the data path
-is repository-specific. The server supports the current newline-delimited
+`~/.codex/config.toml`. The server supports the current newline-delimited
 JSON-RPC stdio transport and MCP protocol version `2025-06-18`. The equivalent
 user-local CLI command is:
 
 ```sh
-codex mcp add refloom --env REFLOOM_DATA_DIR=/absolute/path/to/refloom/data -- node /absolute/path/to/refloom/mcp-server.mjs
+codex mcp add refloom --env DATABASE_URL=postgresql://... --env REFLOOM_S3_ENDPOINT=http://... --env REFLOOM_S3_REGION=us-east-1 --env REFLOOM_S3_BUCKET=refloom --env REFLOOM_S3_ACCESS_KEY_ID=... --env REFLOOM_S3_SECRET_ACCESS_KEY=... -- node /absolute/path/to/refloom/mcp-server.mjs
 ```
 
 Read tools progressively disclose project and board summaries before paginated
@@ -97,20 +104,17 @@ rendering constraints.
 
 Project and reference deletion and the full reset action require confirmation.
 
-## Local data and backups
+## Data and backups
 
-The authoritative workspace and captured media live below the repository-local
-`data/` directory by default. Set `REFLOOM_DATA_DIR` to choose another local
-directory. `data/` is ignored by Git; do not place it under a tracked source
-path. The browser talks only to the same-origin localhost companion. This
-boundary lets the UI and the stdio MCP process coordinate through revisions
-without silently overwriting each other.
+PostgreSQL is the sole workspace authority and the private S3-compatible bucket
+is the sole captured-media authority. Browser, HTTP, MCP, and capture coordinate
+through the same global revision. The browser stores no authoritative data;
+`localStorage` retains only the selected project ID.
 
-On the first empty startup, Refloom offers to copy an existing IndexedDB
-workspace and all referenced blobs. Migration is one-way and never deletes the
-legacy browser copy. If migration fails, fix the reported missing data or export
-the legacy backup with the earlier version, then retry while server state is
-still empty. `localStorage` retains only non-authoritative project selection.
+There is no reader or automatic migration for old browser/file persistence.
+Before upgrading, export a version-2 backup from a supported pre-cutover build,
+or start with an empty database. Backup version 1 and raw workspace files are
+rejected.
 
 Download workspace backups regularly. A backup contains the complete workspace,
 provenance, source URLs, notes, and base64-encoded captured media, so treat it as
@@ -126,7 +130,7 @@ method needed to reproduce them.
 
 ## 0.1 scope
 
-Included: local project/reference capture and enrichment, controlled automatic
+Included: project/reference capture and enrichment, controlled automatic
 website screenshot checkpoints, precise selections, boards, factual activity
 signals, Markdown/JSON direction export, validated backup/import, cascade
 deletion, and local reset.

@@ -1,8 +1,7 @@
 # Issue #5 persistence design
 
-Status: accepted implementation contract for Issue #5. This document is the
-first bounded step in the implementation sequence; it does not itself deliver
-the new persistence system.
+Status: implemented contract for Issue #5. The repository now delivers this
+single PostgreSQL/S3 persistence architecture and its production-path tests.
 
 ## Decision
 

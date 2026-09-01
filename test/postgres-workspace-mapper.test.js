@@ -123,7 +123,7 @@ test('exports FK-safe orders and fixed parameterized insert specifications', () 
   assert.deepEqual(Object.keys(INSERT_SPECIFICATIONS), INSERT_ORDER);
   for (const table of INSERT_ORDER) {
     const specification = INSERT_SPECIFICATIONS[table];
-    assert.match(specification.text, /^insert into [a-z_]+ \(.+\) values \(\$1/);
+    assert.match(specification.text, /^insert into (?:[a-z_]+|"references") \(.+\) values \(\$1/);
     assert.equal(specification.text.includes(';'), false);
     assert.deepEqual(specification.values(workspaceToRows(completeWorkspace())[table][0]).length,
       specification.text.match(/\$\d+/g).length);

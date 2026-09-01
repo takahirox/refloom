@@ -7,6 +7,9 @@ const required = [
   'package.json',
   'README.md',
   'LICENSE',
+  'Dockerfile',
+  'compose.yaml',
+  'compose.integration.yaml',
   'docs/PRODUCT_SPEC.md',
   'docs/ARCHITECTURE.md',
   'docs/EXPORT_SCHEMA.md',
@@ -39,6 +42,7 @@ const required = [
   'test/capture-proxy.test.js',
   'test/chrome-capture.test.js',
   'test/website-capture-service.test.js',
+  'test/integration/persistence.integration.test.js',
   'test/domain.test.js',
   'test/storage.test.js',
   'test/create-persistence-repository.test.js',
@@ -50,7 +54,9 @@ const required = [
   'test/ui-format.test.js',
   'test/server.test.js',
   'test/mcp-server.test.js',
-  'scripts/check.mjs'
+  'scripts/check.mjs',
+  'scripts/init-bucket.mjs',
+  'scripts/test-integration.mjs'
 ];
 
 for (const file of required) {

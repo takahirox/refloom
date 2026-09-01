@@ -39,7 +39,7 @@ MCP is a separately versioned live operational contract, not a backup or a
 complete portable expression of the workspace.
 
 The MCP server is a local child process with the operating-system permissions of
-the user who launches Codex. Configure an explicit absolute data directory and
+the user who launches Codex. Configure only the required PostgreSQL/S3 variables and
 review project-local Codex configuration before trusting it. Refloom never
 silently edits user or project Codex configuration.
 
@@ -47,7 +47,7 @@ The exposed tool surface is deliberately narrower than the browser: reads are
 bounded and progressively disclosed; mutations are additive except for explicit
 reference-field enrichment; and destructive, backup-import, reorder, reset, and
 general workspace-write operations are absent. Optimistic revisions and the
-shared filesystem lock reject stale concurrent writes.
+shared PostgreSQL revision lock reject stale concurrent writes.
 
 Media reads accept only `refloom://media/<opaque-id>` resources derived from
 registered blob-backed assets. The store verifies current authoritative
@@ -83,15 +83,13 @@ These controls reduce SSRF, DNS-rebinding, session-leakage, and
 resource-exhaustion risk; they are not a claim of perfect browser sandboxing.
 The complete boundary is in `WEBSITE_CAPTURE.md`.
 
-## Local data and provenance
+## Persistent data and provenance
 
-The authoritative workspace JSON and media are stored unencrypted below the
-configured local data directory and are exchanged only with the same-origin
-localhost companion. Filesystem permissions, backups, and anyone with account
-access may read or remove them. The default `data/` directory is Git-ignored but
-users must still avoid committing or synchronizing it. IndexedDB is retained
-only as a read-only legacy migration/recovery copy and is never deleted
-automatically.
+The authoritative workspace is stored in PostgreSQL and media in the configured
+private S3-compatible bucket. Database/object-store operators, credentials,
+backups, and anyone with host access may read or remove them. Credentials stay
+in environment configuration and must not be committed. The browser retains no
+authoritative copy and there is no browser-database or filesystem recovery reader.
 
 Source URLs, creator fields, capture times, capture methods, and asset provenance
 are retained when provided. Provenance records user-supplied facts; it does not
@@ -107,7 +105,7 @@ does not delete copies already downloaded, synchronized, or backed up elsewhere.
 
 ## Limits and reporting
 
-There is no authentication, multi-user authorization, encrypted vault, malware
+There is no end-user authentication, multi-user authorization, encrypted vault, malware
 scanner, URL reputation service, automatic redaction, hosted recovery, security
 update channel, or legal/copyright determination in 0.1. The localhost server is
 for local development and personal use, not direct Internet exposure. Security

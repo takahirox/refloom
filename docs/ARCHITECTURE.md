@@ -2,10 +2,10 @@
 
 ## Decisions
 
-Refloom 0.1 is a dependency-free browser application served by a small Node.js
-static server. It has no account system, hosted API, build step, telemetry, or
-required network service. This keeps the core workflow inspectable and usable
-offline after its files are available.
+Refloom 0.1 is a browser application served by a small Node.js HTTP service. It
+has no account system, hosted API, telemetry, or AI dependency. PostgreSQL and a
+private S3-compatible object store provide one cloud-capable persistence path
+for local Compose and deployed environments.
 
 The server exposes only `public/` and `src/`, binds to `127.0.0.1` by default,
 and applies one security-header policy to success and error responses. Its
@@ -16,10 +16,11 @@ The browser code is separated into these boundaries:
 
 - `domain.js`: immutable workspace operations, relationships, validation,
   deletion cascades, factual signals, and creative-direction export.
-- `storage.js`: browser HTTP repository, legacy migration helpers, and stable
-  backup encoding/decoding.
-- `file-workspace-store.js`: validated revisioned envelopes, media, locking,
-  limits, atomic replacement, and orphan cleanup.
+- `storage.js`: browser HTTP repository and backup-v2 encoding/decoding.
+- `postgres-workspace-repository.js`: normalized relational reconstruction,
+  revision transactions, backup snapshots, and authorized media access.
+- `s3-media-store.js`: immutable verified media writes/reads and bounded orphan
+  cleanup under `media/`.
 - `ui-format.js`: presentation-only formatting and filename normalization.
 - `app.js`: DOM events, orchestration, confirmation, rendering, and downloads.
   It renders user content with text nodes rather than HTML injection.
@@ -55,27 +56,26 @@ through owned entities so boards cannot retain dangling selections.
 
 ## Storage boundaries
 
-The Node companion owns `data/workspace.json` and `data/media/`. Workspace JSON
-is a validated, independently versioned persistence envelope. Media names are
-strict opaque identifiers, never user paths. Commits serialize in-process and
-take a bounded cross-process lock, compare the caller revision, stage and sync
-media, atomically replace state with temporary-file-plus-rename, then delete
-sorted unreferenced media. State never references media before it is durable;
-an interrupted cleanup can only leave safe orphans for the next commit.
+PostgreSQL owns normalized entity rows and one locked `workspace_state`
+revision. S3 owns immutable media at `media/<opaque-id>`. A mutation validates
+the complete workspace, uploads and verifies new bytes, locks the singleton
+revision row, replaces relational rows in one transaction, verifies every blob
+reference, and advances the revision exactly once. A database failure after an
+upload leaves a safe orphan; grace-based bounded cleanup removes it later.
 
 The same-origin API loads and commits complete workspaces, reads referenced
-media, and imports/exports the existing backup contract. Host and Origin checks,
+media, and imports/exports backup version 2. Host and Origin checks,
 JSON and body limits, validation, and optimistic revisions protect the local
 boundary. It intentionally has no CORS policy and is not a public listener.
 
-IndexedDB remains read-only migration input. `localStorage` contains only the
-current project ID.
+There is no IndexedDB or filesystem authority/migration path. `localStorage`
+contains only the current project ID.
 Object URLs used for previews are temporary presentation resources, not durable
-storage; the local Node file store is authoritative persistence.
+storage.
 
-The MCP process opens the same configured `FileWorkspaceStore`. Every mutation
+The MCP process opens the same configured PostgreSQL/S3 repository. Every mutation
 loads an authoritative revision, applies one domain operation, and commits with
-optimistic revision comparison under the store's cross-process lock. An
+optimistic revision comparison under the database revision lock. An
 explicit stale `expectedRevision`, or a race after loading, produces
 `REVISION_CONFLICT`; the server never retries against changed state or silently
 merges an agent's assumptions.
@@ -91,7 +91,7 @@ fetched by the server.
 
 1. A UI event supplies explicit user input or captured media.
 2. A domain function returns a new validated workspace value.
-3. The HTTP repository commits workspace JSON and binary additions at its last observed revision.
+3. The HTTP repository commits normalized rows and verified binary additions at its last observed revision.
 4. The application rerenders from committed state.
 5. Board export derives a read-only creative-direction package; backup export
    packages the whole workspace and referenced binaries.
@@ -109,10 +109,10 @@ states.
 
 ## Versioning
 
-The persistence envelope, `refloom.workspace-backup`,
-`refloom.creative-direction`, and live MCP tool/resource surface are separate,
-independently versioned contracts. Readers must reject unsupported incompatible
-versions rather than silently guessing. MCP is an operational interface with
+SQL migrations, `refloom.workspace-backup`, `refloom.creative-direction`, and
+the live MCP tool/resource surface are separate, independently versioned
+contracts. Readers must reject unsupported incompatible versions rather than
+silently guessing. MCP is an operational interface with
 bounded reads and mutations, not an atomic restorable backup. A future domain
 migration must be explicit, deterministic, tested, and preserve provenance,
 IDs, relationships, and media. See `PRODUCT_SPEC.md` for the product and

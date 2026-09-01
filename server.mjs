@@ -274,7 +274,7 @@ export function createRefloomServer(options = {}) {
 export function startRefloomServer(options = {}) {
   const server = createRefloomServer(options);
   const port = Number(options.port ?? process.env.PORT ?? 4173);
-  const host = options.host ?? '127.0.0.1';
+  const host = options.host ?? process.env.HOST ?? '127.0.0.1';
 
   server.once('error', () => {
     console.error('Refloom could not start');

@@ -33,7 +33,7 @@ export function createPersistenceRepository(options = {}) {
       endpoint: config.s3.endpoint,
       region: config.s3.region,
       forcePathStyle: config.s3.forcePathStyle,
-      credentials: config.s3.credentials,
+      credentials: { ...config.s3.credentials },
       followRegionRedirects: false,
       maxAttempts: 3
     });
