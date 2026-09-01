@@ -21,3 +21,11 @@ test('UI saves before capture and does not auto-capture URL edits or non-URL imp
   const files = source.slice(source.indexOf('async function captureFiles'), source.indexOf('function referenceEditor'));
   assert.doesNotMatch(files, /captureWebsite/);
 });
+
+test('Reference cards expose safe website links in a new tab', async () => {
+  const source = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  assert.match(source, /text: 'Visit website'/);
+  assert.match(source, /target: '_blank'/);
+  assert.match(source, /rel: 'noopener noreferrer'/);
+  assert.match(source, /safeExternalWebsiteUrl\(reference\.sourceUrl\)/);
+});

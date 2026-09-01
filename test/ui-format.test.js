@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { displayReference, formatMoment, formatSeconds, formatSignal, safeFilename } from '../src/ui-format.js';
+import {
+  displayReference, formatMoment, formatSeconds, formatSignal, safeExternalWebsiteUrl,
+  safeFilename
+} from '../src/ui-format.js';
 
 test('reference labels fall back without inventing metadata', () => {
   assert.equal(displayReference({ title: 'Poster', sourceUrl: 'https://example.com' }), 'Poster');
@@ -25,4 +28,12 @@ test('signals are rendered as factual actions', () => {
 test('download filenames are portable', () => {
   assert.equal(safeFilename('My Creative Direction!', 'json'), 'my-creative-direction.json');
   assert.equal(safeFilename('', 'md'), 'refloom.md');
+});
+
+test('external website links allow only absolute HTTP and HTTPS URLs', () => {
+  assert.equal(safeExternalWebsiteUrl('https://example.com/path?q=1'), 'https://example.com/path?q=1');
+  assert.equal(safeExternalWebsiteUrl('http://example.com'), 'http://example.com/');
+  for (const value of [
+    'javascript:alert(1)', 'data:text/html,hello', '/relative', 'not a URL', undefined
+  ]) assert.equal(safeExternalWebsiteUrl(value), null);
 });
