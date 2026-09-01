@@ -20,11 +20,13 @@
       <a href="#activity">Activity</a>
       <a href="#data">Data</a>
     </nav>
-    <label class="project-switcher">Project
-      <select id="project-select" aria-describedby="project-help"></select>
-    </label>
-    <span id="project-help" class="sr-only">Switch the active project</span>
-    <button id="new-project" class="primary" type="button">New project</button>
+    <div class="topbar-tools">
+      <label class="project-switcher">Project
+        <select id="project-select" aria-describedby="project-help"></select>
+      </label>
+      <span id="project-help" class="sr-only">Switch the active project</span>
+      <button id="new-project" class="primary" type="button">New project</button>
+    </div>
   </header>
 
   <main id="main" tabindex="-1">
@@ -33,14 +35,19 @@
       <p class="eyebrow">Authoritative shared workspace · backup ready</p>
       <h1 id="welcome-title">Turn references into clear creative direction.</h1>
       <p>Capture first, enrich later, and preserve exactly why each detail belongs on the board.</p>
-      <button id="welcome-create" class="primary" type="button">Create your first project</button>
+      <div class="hero-actions"><button id="welcome-create" class="primary" type="button">Create your first project</button></div>
+      <ol class="hero-steps" aria-label="How Refloom works">
+        <li><span class="step-index">01</span><strong>Capture</strong><span>Save URLs, drop images, or paste screenshots into a shared library.</span></li>
+        <li><span class="step-index">02</span><strong>Enrich</strong><span>Add titles, creators, and notes once the reference is safely stored.</span></li>
+        <li><span class="step-index">03</span><strong>Compose</strong><span>Select evidence, name the aspect, and arrange the board for export.</span></li>
+      </ol>
     </section>
 
     <section id="library" class="view" aria-labelledby="library-title">
       <div class="section-head"><div><p class="eyebrow">Capture first</p><h1 id="library-title">Reference library</h1></div><button id="edit-project" type="button">Edit project</button></div>
       <p id="project-brief" class="lede"></p>
       <div class="capture-grid">
-        <form id="url-form" class="panel">
+        <form id="url-form" class="panel capture-form">
           <h2>Save a URL</h2>
           <label for="capture-url">Source URL</label>
           <div class="inline"><input id="capture-url" name="url" type="url" required placeholder="https://example.com"><button class="primary" type="submit">Save</button></div>
@@ -85,7 +92,8 @@
         <label class="check-option"><input id="automatic-website-capture" type="checkbox" checked> Automatically capture newly saved website References</label>
         <p class="hint">This shared Workspace preference changes the visible default. Each URL can still opt in or out before saving.</p>
       </div>
-      <div class="panel data-actions"><button id="backup" type="button">Download workspace backup</button><label class="button" for="restore-file">Import workspace backup</label><input id="restore-file" class="sr-only" type="file" accept="application/json"><button id="delete-project" class="danger" type="button">Delete current project</button><button id="reset" class="danger" type="button">Reset shared workspace</button></div>
+      <div class="panel data-actions"><div class="panel-head"><h2>Backup</h2><p class="hint">Download the whole shared workspace or replace it with an earlier backup.</p></div><div class="actions"><button id="backup" type="button">Download workspace backup</button><label class="button" for="restore-file">Import workspace backup</label><input id="restore-file" class="sr-only" type="file" accept="application/json"></div></div>
+      <div class="panel data-actions danger-zone"><div class="panel-head"><h2>Remove data</h2><p class="hint">These actions cannot be undone and affect every client using this workspace.</p></div><div class="actions"><button id="delete-project" class="danger" type="button">Delete current project</button><button id="reset" class="danger" type="button">Reset shared workspace</button></div></div>
       <p class="hint">Backups contain workspace records and captured binary files from the authoritative workspace service.</p>
     </section>
   </main>
