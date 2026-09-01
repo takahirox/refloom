@@ -115,6 +115,24 @@ test('failure before the first callback leaves the reference unchanged', async (
   assert.deepEqual(await store.load(), before);
 });
 
+test('WebGL failure preserves the bounded diagnostic and persists zero checkpoints', async () => {
+  const store = await fixture();
+  const before = await store.load();
+  let callbacks = 0;
+  const driver = async (_url, options) => {
+    assert.equal(typeof options.onScreenshot, 'function');
+    const error = new Error('Website capture failed.');
+    Object.defineProperty(error, 'captureDiagnosticCode', { value: 'WEBGL_UNAVAILABLE' });
+    throw error;
+  };
+  const result = await captureReference(store, 'reference-1', {}, dependencies(driver, []));
+  assert.deepEqual(result, {
+    status: 'failed', captured: [], error: 'CAPTURE_FAILED', diagnostic: 'WEBGL_UNAVAILABLE'
+  });
+  assert.equal(callbacks, 0);
+  assert.deepEqual(await store.load(), before);
+});
+
 test('failure after the first callback keeps the committed checkpoint', async () => {
   const store = await fixture();
   const driver = async (_url, options) => {

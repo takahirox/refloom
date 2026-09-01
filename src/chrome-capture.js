@@ -12,7 +12,8 @@ const KNOWN_CHROME = process.platform === 'darwin'
     : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
 
 const CAPTURE_DIAGNOSTICS = new Set([
-  'BROWSER_UNAVAILABLE', 'BROWSER_START_FAILED', 'CAPTURE_RUNTIME_FAILED'
+  'BROWSER_UNAVAILABLE', 'BROWSER_START_FAILED', 'CAPTURE_RUNTIME_FAILED',
+  'WEBGL_UNAVAILABLE'
 ]);
 
 function diagnosticError(code, cause) {
@@ -45,6 +46,24 @@ async function bounded(promise, clock, ms) {
     ]);
   } finally {
     (clock.clearTimeout || globalThis.clearTimeout)(timer);
+  }
+}
+
+const WEBGL_CAPABILITY_EXPRESSION = `(() => {
+  const canvas = document.createElement('canvas');
+  return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+})()`;
+
+async function verifyWebGlCapability(cdp, clock, timeoutMs) {
+  try {
+    const available = await bounded(
+      cdp.evaluate(WEBGL_CAPABILITY_EXPRESSION),
+      clock,
+      timeoutMs
+    );
+    if (available !== true) throw new Error(CAPTURE_ERROR);
+  } catch (error) {
+    throw diagnosticError('WEBGL_UNAVAILABLE', error);
   }
 }
 
@@ -175,6 +194,7 @@ export async function verifyChromeRuntime(options = {}) {
     } catch (error) {
       throw diagnosticError('BROWSER_START_FAILED', error);
     }
+    await verifyWebGlCapability(cdp, clock, timeoutMs);
     return true;
   } catch (error) {
     throw diagnosticError(captureDiagnosticCode(error) || 'CAPTURE_RUNTIME_FAILED', error);
@@ -275,6 +295,7 @@ export async function captureWebsite(input, options = {}) {
     active();
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+    await verifyWebGlCapability(cdp, clock, checkpointMs);
     await cdp.send('Target.setDiscoverTargets', { discover: true });
     await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' });
     await cdp.send('Network.enable');
