@@ -116,9 +116,9 @@ asset provenance are returned with the bytes.
 Run `docker compose exec -T app npm run check:browser` to verify the bundled
 browser, loopback CDP connection, and WebGL capability without contacting an
 external website. `BROWSER_UNAVAILABLE`, `BROWSER_START_FAILED`,
-`WEBGL_UNAVAILABLE`, and `CAPTURE_RUNTIME_FAILED` diagnostics are written only
-to MCP stderr; tool responses retain the stable, path-free `CAPTURE_FAILED`
-error.
+`WEBGL_UNAVAILABLE`, `PAGE_RUNTIME_ERROR`, and `CAPTURE_RUNTIME_FAILED`
+diagnostics are written only to MCP stderr; tool responses retain the stable,
+path-free `CAPTURE_FAILED` error.
 `npm run check` verifies required deliverables, JavaScript syntax, and safe
 rendering constraints.
 

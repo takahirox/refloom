@@ -100,8 +100,11 @@ test('drives bounded deterministic checkpoints and always cleans up', async () =
   assert.equal(calls.some(([method]) => method === 'Browser.setDownloadBehavior'), true);
   assert.equal(calls.some(([method]) => method === 'Network.setBypassServiceWorker'), true);
   const capabilityIndex = calls.findIndex(([method, value]) => method === 'evaluate' && value.includes("getContext('webgl2')"));
+  const hookIndex = calls.findIndex(([method, value]) => method === 'Page.addScriptToEvaluateOnNewDocument' && value.source.includes('HTMLCanvasElement.prototype.getContext'));
   const navigationIndex = calls.findIndex(([method]) => method === 'Page.navigate');
   assert.notEqual(capabilityIndex, -1);
+  assert.notEqual(hookIndex, -1);
+  assert.equal(hookIndex < navigationIndex, true);
   assert.equal(capabilityIndex < navigationIndex, true);
   const args = calls.find(([method]) => method === 'spawn')[1];
   assert.equal(args.includes('--remote-debugging-port=0'), true);
@@ -195,6 +198,65 @@ test('reports WebGL unavailability before navigation or screenshot persistence',
   assert.equal(proxyClosed, true);
   assert.equal(processKilled, true);
   assert.equal(removed, true);
+});
+
+test('page HTTP and WebGL runtime failures are diagnosed before screenshot callbacks', async t => {
+  for (const scenario of [
+    { name: 'main document HTTP failure', status: 404, webGlContextFailure: false },
+    { name: 'page WebGL context failure', status: 200, webGlContextFailure: true }
+  ]) {
+    await t.test(scenario.name, async () => {
+      const calls = [];
+      const callbacks = [];
+      const listeners = new Map();
+      const process = new EventEmitter();
+      process.kill = () => {};
+      let failure;
+      const cdp = {
+        targetId: 'target',
+        send: async (method, params) => {
+          calls.push([method, params]);
+          if (method === 'Page.navigate') {
+            listeners.get('Network.responseReceived')?.({
+              type: 'Document', frameId: 'main-frame', response: { status: scenario.status }
+            });
+            return { frameId: 'main-frame' };
+          }
+          if (method === 'Page.captureScreenshot') throw new Error('screenshot must not run');
+          return {};
+        },
+        evaluate: async expression => {
+          calls.push(['evaluate', expression]);
+          if (expression.includes("document.createElement('canvas')")) return true;
+          if (expression.includes('refloom.pageRuntimeDiagnostic')) return scenario.webGlContextFailure;
+          throw new Error('metrics must not run');
+        },
+        waitFor: async () => {},
+        on(method, listener) { listeners.set(method, listener); },
+        close: async () => {}
+      };
+      await assert.rejects(captureWebsite('https://example.com', {
+        resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+        executable: '/fake/chrome',
+        fs: {
+          access: async () => {}, mkdtemp: async () => '/tmp/refloom-page-runtime-test',
+          rm: async () => {}
+        },
+        spawn: () => process,
+        createProxy: () => ({ listen: async () => ({ port: 43210 }), close: async () => {} }),
+        connectCdp: async () => cdp,
+        readinessMs: 0,
+        onScreenshot: async screenshot => callbacks.push(screenshot)
+      }), error => {
+        failure = error;
+        return error.message === 'Website capture failed.';
+      });
+      assert.equal(captureDiagnosticCode(failure), 'PAGE_RUNTIME_ERROR');
+      assert.deepEqual(callbacks, []);
+      assert.equal(calls.some(([method]) => method === 'Page.captureScreenshot'), false);
+      assert.equal(calls.some(([method, expression]) => method === 'evaluate' && expression.startsWith('({')), false);
+    });
+  }
 });
 
 test('browser runtime verification reports the stable WebGL diagnostic', async () => {

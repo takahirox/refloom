@@ -37,8 +37,10 @@ If the executable is missing or cannot establish CDP, the MCP tool still returns
 the generic `CAPTURE_FAILED` boundary error. A stable `BROWSER_UNAVAILABLE`,
 `BROWSER_START_FAILED`, `WEBGL_UNAVAILABLE`, or `CAPTURE_RUNTIME_FAILED`
 diagnostic is written only to stderr, without executable/profile paths or
-captured URLs. Host-process runs may set `REFLOOM_CHROME_PATH`; MCP callers
-cannot override it.
+captured URLs. A main-document HTTP status of 400 or higher or a failed page
+WebGL/WebGL2 context request produces the same public error with the stable
+`PAGE_RUNTIME_ERROR` diagnostic before any screenshot is persisted.
+Host-process runs may set `REFLOOM_CHROME_PATH`; MCP callers cannot override it.
 
 ## Default-on initial capture
 

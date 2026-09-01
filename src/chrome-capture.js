@@ -13,7 +13,7 @@ const KNOWN_CHROME = process.platform === 'darwin'
 
 const CAPTURE_DIAGNOSTICS = new Set([
   'BROWSER_UNAVAILABLE', 'BROWSER_START_FAILED', 'CAPTURE_RUNTIME_FAILED',
-  'WEBGL_UNAVAILABLE'
+  'WEBGL_UNAVAILABLE', 'PAGE_RUNTIME_ERROR'
 ]);
 
 function diagnosticError(code, cause) {
@@ -53,6 +53,29 @@ const WEBGL_CAPABILITY_EXPRESSION = `(() => {
   const canvas = document.createElement('canvas');
   return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl'));
 })()`;
+
+const PAGE_RUNTIME_HOOK = `(() => {
+  const state = { webGlContextFailure: false };
+  Object.defineProperty(globalThis, Symbol.for('refloom.pageRuntimeDiagnostic'), {
+    value: state
+  });
+  const original = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+    const isWebGl = type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl';
+    try {
+      const context = Reflect.apply(original, this, [type, ...args]);
+      if (isWebGl && context === null) state.webGlContextFailure = true;
+      return context;
+    } catch (error) {
+      if (isWebGl) state.webGlContextFailure = true;
+      throw error;
+    }
+  };
+})()`;
+
+const PAGE_RUNTIME_DIAGNOSTIC_EXPRESSION = `Boolean(
+  globalThis[Symbol.for('refloom.pageRuntimeDiagnostic')]?.webGlContextFailure
+)`;
 
 async function verifyWebGlCapability(cdp, clock, timeoutMs) {
   try {
@@ -297,6 +320,7 @@ export async function captureWebsite(input, options = {}) {
     active();
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: PAGE_RUNTIME_HOOK });
     await verifyWebGlCapability(cdp, clock, checkpointMs);
     await cdp.send('Target.setDiscoverTargets', { discover: true });
     await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' });
@@ -313,6 +337,13 @@ export async function captureWebsite(input, options = {}) {
     };
     cdp.on?.('Target.targetCreated', closePopup);
     cdp.on?.('Target.targetInfoChanged', closePopup);
+    const documentStatuses = new Map();
+    cdp.on?.('Network.responseReceived', event => {
+      if (event.type === 'Document' && typeof event.frameId === 'string' &&
+          Number.isFinite(event.response?.status)) {
+        documentStatuses.set(event.frameId, event.response.status);
+      }
+    });
     let redirects = 0;
     let rejectRedirects;
     const redirectLimit = new Promise((_, reject) => { rejectRedirects = reject; });
@@ -328,6 +359,12 @@ export async function captureWebsite(input, options = {}) {
     await bounded(Promise.race([loaded, redirectLimit]), clock, checkpointMs);
     await bounded(pause(clock, readinessMs), clock, readinessMs + 100);
     active();
+    const webGlContextFailure = await bounded(
+      cdp.evaluate(PAGE_RUNTIME_DIAGNOSTIC_EXPRESSION), clock, checkpointMs
+    );
+    if ((documentStatuses.get(navigation.frameId) ?? 0) >= 400 || webGlContextFailure === true) {
+      throw diagnosticError('PAGE_RUNTIME_ERROR');
+    }
     const metrics = await cdp.evaluate(`({
       title: document.title,
       url: location.href,
