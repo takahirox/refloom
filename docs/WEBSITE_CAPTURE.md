@@ -8,10 +8,13 @@ product principle.
 
 ## Runtime packaging and MCP
 
-The Compose app image installs Chromium and sets `REFLOOM_CHROME_PATH` to its
-container executable. This lets `docker compose exec -T app node mcp-server.mjs`
-use the same private PostgreSQL/S3 network and controlled-browser runtime as the
-HTTP application without publishing database or object-store ports.
+The Compose app image installs Chromium and `xvfb-run`, sets
+`REFLOOM_CHROME_PATH` to the browser executable and `DISPLAY=:99`, and wraps
+image commands with a fixed `1920x1080x24` display whose TCP listener is
+disabled. The app command keeps that container-local X server alive, so HTTP
+application and `docker compose exec -T app node mcp-server.mjs` captures share
+it; the integration command uses the same runtime. Database, object-store, and
+X server ports remain unpublished.
 
 The app and integration containers run as the image's non-root `node` user with
 `no-new-privileges`. `config/chromium-seccomp.json` vendors Docker 29.1.3's
@@ -19,21 +22,23 @@ default profile and adds exact-value allowances for only the Chromium sandbox
 namespace calls observed in this image: `clone` combinations for user/PID/network
 namespaces and `unshare(CLONE_NEWUSER)`. Chromium is not launched with
 `--no-sandbox`, and the profile retains Docker's default syscall and capability
-restrictions. Re-check the profile when changing the Chromium or Docker base
-version. Upstream provenance and the exact added rules are recorded in
-`config/README.md`.
+restrictions. Chromium remains headless, retains its GPU sandbox, and uses
+ANGLE with the GL backend and a GPU blocklist override for software WebGL.
+Re-check the profile when changing the Chromium or Docker base version.
+Upstream provenance and the exact added rules are recorded in `config/README.md`.
 
 `npm run check:browser` launches the configured browser against `about:blank`,
 connects to its profile-published loopback CDP endpoint, requests the browser
-version, and cleans up the process and temporary profile. It never contacts an
-external website. The integration container runs this check before persistence
-tests.
+version, proves that a WebGL or WebGL2 context can be created, and cleans up the
+process and temporary profile. It never contacts an external website. The
+integration container runs this check before persistence tests.
 
 If the executable is missing or cannot establish CDP, the MCP tool still returns
 the generic `CAPTURE_FAILED` boundary error. A stable `BROWSER_UNAVAILABLE`,
-`BROWSER_START_FAILED`, or `CAPTURE_RUNTIME_FAILED` diagnostic is written only
-to stderr, without executable/profile paths or captured URLs. Host-process runs
-may set `REFLOOM_CHROME_PATH`; MCP callers cannot override it.
+`BROWSER_START_FAILED`, `WEBGL_UNAVAILABLE`, or `CAPTURE_RUNTIME_FAILED`
+diagnostic is written only to stderr, without executable/profile paths or
+captured URLs. Host-process runs may set `REFLOOM_CHROME_PATH`; MCP callers
+cannot override it.
 
 ## Default-on initial capture
 
@@ -73,7 +78,10 @@ monitoring, video, and scripted interaction remain explicit operations.
 - The proxy is loopback-only, is intended solely for its controlled Chrome
   process, strips proxy credentials and hop-by-hop headers, and bounds time,
   bytes, and connection creation. Closing it destroys tracked sockets.
-- Chrome uses a new temporary profile, an ephemeral debugging port, the local
+- Chrome stays headless and sandboxed while `--use-gl=angle`, `--use-angle=gl`,
+  and `--ignore-gpu-blocklist` make its software WebGL path explicit; neither
+  the browser sandbox nor GPU sandbox is disabled. Chrome uses a new temporary
+  profile, an ephemeral debugging port, the local
   proxy, no inherited session, disabled QUIC/non-proxied UDP, denied downloads,
   disabled cache, and service-worker bypass. Popups are closed.
 - Browser, CDP, proxy, sockets, and temporary profile cleanup is attempted on

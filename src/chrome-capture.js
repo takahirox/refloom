@@ -180,6 +180,7 @@ export async function verifyChromeRuntime(options = {}) {
       `--user-data-dir=${profile}`, '--remote-debugging-port=0',
       '--remote-debugging-address=127.0.0.1', '--headless=new',
       '--disable-dev-shm-usage', '--disable-background-networking',
+      '--use-gl=angle', '--use-angle=gl', '--ignore-gpu-blocklist',
       '--disable-sync', '--disable-extensions', '--no-first-run',
       '--no-default-browser-check', 'about:blank'
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -275,6 +276,7 @@ export async function captureWebsite(input, options = {}) {
       `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
       '--headless=new', '--hide-scrollbars', '--incognito', '--no-first-run',
       '--no-default-browser-check', '--disable-dev-shm-usage', '--disable-quic', '--disable-background-networking',
+      '--use-gl=angle', '--use-angle=gl', '--ignore-gpu-blocklist',
       '--disable-sync', '--disable-extensions', '--disable-component-update',
       '--disable-features=MediaRouter,WebRtcHideLocalIpsWithMdns',
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',

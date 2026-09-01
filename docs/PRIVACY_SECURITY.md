@@ -82,9 +82,13 @@ executable, proxy, or process dependencies. Capture modules
 treat pages and DNS as hostile, reject non-public destinations, pin every
 validated proxy connection, and run Chrome with fresh temporary state and
 bounded resources. Redirects and subresources traverse the same proxy boundary.
-These controls reduce SSRF, DNS-rebinding, session-leakage, and
-resource-exhaustion risk; they are not a claim of perfect browser sandboxing.
-The complete boundary is in `WEBSITE_CAPTURE.md`.
+Container captures use a fixed container-local Xvfb display whose TCP listener
+is disabled. Chromium stays headless, retains both its browser and GPU
+sandboxes, and uses an explicit ANGLE GL path; neither `--no-sandbox` nor
+`--disable-gpu-sandbox` is used. These controls reduce SSRF, DNS-rebinding,
+session-leakage, display exposure, and resource-exhaustion risk; they are not a
+claim of perfect browser sandboxing. The complete boundary is in
+`WEBSITE_CAPTURE.md`.
 
 ## Persistent data and provenance
 

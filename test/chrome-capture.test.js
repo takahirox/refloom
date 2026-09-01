@@ -107,6 +107,12 @@ test('drives bounded deterministic checkpoints and always cleans up', async () =
   assert.equal(args.includes('--remote-debugging-port=0'), true);
   assert.equal(args.includes('--disable-quic'), true);
   assert.equal(args.some(value => value.includes('disable_non_proxied_udp')), true);
+  assert.equal(args.includes('--headless=new'), true);
+  assert.equal(args.includes('--use-gl=angle'), true);
+  assert.equal(args.includes('--use-angle=gl'), true);
+  assert.equal(args.includes('--ignore-gpu-blocklist'), true);
+  assert.equal(args.includes('--no-sandbox'), false);
+  assert.equal(args.includes('--disable-gpu-sandbox'), false);
   assert.equal(proxyClosed, true);
   assert.equal(processKilled, true);
   assert.deepEqual(removed, ['/tmp/refloom-test']);
@@ -136,7 +142,12 @@ test('browser runtime verification launches loopback CDP without external naviga
   assert.equal(calls[0].file, '/runtime/chromium');
   assert.equal(calls[0].args.includes('about:blank'), true);
   assert.equal(calls[0].args.includes('--disable-dev-shm-usage'), true);
+  assert.equal(calls[0].args.includes('--headless=new'), true);
+  assert.equal(calls[0].args.includes('--use-gl=angle'), true);
+  assert.equal(calls[0].args.includes('--use-angle=gl'), true);
+  assert.equal(calls[0].args.includes('--ignore-gpu-blocklist'), true);
   assert.equal(calls[0].args.includes('--no-sandbox'), false);
+  assert.equal(calls[0].args.includes('--disable-gpu-sandbox'), false);
   assert.equal(calls.some(call => call.method === 'Browser.getVersion'), true);
   assert.equal(calls.some(call => call.expression?.includes("getContext('webgl2')")), true);
   assert.equal(killed, true);
