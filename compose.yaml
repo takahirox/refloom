@@ -74,7 +74,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:4173:4173"
-    networks: [private]
+    networks: [private, edge]
 
   integration:
     build: .
@@ -102,3 +102,4 @@ volumes:
 networks:
   private:
     internal: true
+  edge:
