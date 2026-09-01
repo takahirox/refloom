@@ -8,10 +8,11 @@ product principle.
 
 ## Runtime packaging and MCP
 
-The Compose app image installs Chromium and `xvfb-run`, sets
-`REFLOOM_CHROME_PATH` to the browser executable and `DISPLAY=:99`, and wraps
-image commands with a fixed `1920x1080x24` display whose TCP listener is
-disabled. The app command keeps that container-local X server alive, so HTTP
+The Compose app image installs Chromium and Xvfb, sets `REFLOOM_CHROME_PATH` to
+the browser executable and `DISPLAY=:99`, and uses a bounded Node entrypoint to
+start a fixed `1920x1080x24` display with TCP disabled. The entrypoint waits for
+the Unix socket, forwards termination signals to the image command, and cleans
+up Xvfb. The app command keeps that container-local X server alive, so HTTP
 application and `docker compose exec -T app node mcp-server.mjs` captures share
 it; the integration command uses the same runtime. Database, object-store, and
 X server ports remain unpublished.

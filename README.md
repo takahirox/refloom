@@ -27,10 +27,11 @@ PostgreSQL and object-store ports remain private inside the Compose network.
 The first startup creates the private bucket and applies checked SQL migrations.
 The app remains non-root with `no-new-privileges` and a checked-in seccomp
 profile that adds only the namespace calls required by Chromium's sandbox.
-The image runs its commands under `xvfb-run` on the fixed container-local
-display `:99`, with a `1920x1080x24` screen and TCP listening disabled. The app,
-integration command, and `docker compose exec` MCP process therefore use the
-same X server while Chromium remains headless and sandboxed.
+The image's bounded Node entrypoint starts Xvfb on the fixed container-local
+display `:99`, waits for its Unix socket, and forwards command signals. Its
+`1920x1080x24` screen has TCP listening disabled. The app, integration command,
+and `docker compose exec` MCP process therefore use the same X server while
+Chromium remains headless and sandboxed.
 
 For a host-process development run, install packages and set `DATABASE_URL`,
 `REFLOOM_S3_ENDPOINT`, `REFLOOM_S3_REGION`, `REFLOOM_S3_BUCKET`,
