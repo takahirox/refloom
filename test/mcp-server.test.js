@@ -57,6 +57,42 @@ function client(store, options = {}) {
   return { server, request };
 }
 
+test('create_project discovers and bootstraps an empty workspace', async t => {
+  const store = new MemoryRepository();
+  const mcp = client(store);
+  t.after(() => mcp.server.close());
+
+  const discovered = await mcp.request('tools/list');
+  const tool = discovered.result.tools.find(item => item.name === 'create_project');
+  assert.deepEqual(tool.inputSchema.required, ['title']);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties), ['title', 'brief', 'expectedRevision']);
+  assert.equal(tool.inputSchema.additionalProperties, false);
+  assert.deepEqual(tool.annotations, {
+    title: 'create project', readOnlyHint: false, destructiveHint: false,
+    idempotentHint: false, openWorldHint: false
+  });
+
+  const missing = await mcp.request('tools/call', { name: 'create_project', arguments: {} });
+  assert.equal(missing.result.structuredContent.error.code, 'INVALID_ARGUMENT');
+  const blank = await mcp.request('tools/call', { name: 'create_project', arguments: { title: '  ' } });
+  assert.equal(blank.result.structuredContent.error.code, 'INVALID_ARGUMENT');
+
+  const created = await mcp.request('tools/call', { name: 'create_project', arguments: {
+    title: 'First project', brief: 'A bootstrapped workspace', expectedRevision: 1
+  } });
+  assert.equal(created.result.structuredContent.revision, 2);
+  assert.equal(created.result.structuredContent.entity.title, 'First project');
+  assert.equal(created.result.structuredContent.entity.brief, 'A bootstrapped workspace');
+  assert.deepEqual(store.workspace.projects, [created.result.structuredContent.entity]);
+
+  const stale = await mcp.request('tools/call', { name: 'create_project', arguments: {
+    title: 'Stale project', expectedRevision: 1
+  } });
+  assert.equal(stale.result.structuredContent.error.code, 'REVISION_CONFLICT');
+  assert.deepEqual(stale.result.structuredContent.error.details, { expectedRevision: 1, actualRevision: 2 });
+  assert.equal(store.workspace.projects.length, 1);
+});
+
 test('stdio discovery, progressive reads, additive writes, media, errors, and revisions', async t => {
   const store = fixture();
   const mcp = client(store);

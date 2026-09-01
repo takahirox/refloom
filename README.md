@@ -94,11 +94,15 @@ codex mcp add refloom --env DATABASE_URL=postgresql://... --env REFLOOM_S3_ENDPO
 
 Read tools progressively disclose project and board summaries before paginated
 reference/selection search, exact reference/selection detail, and creative
-direction. Write tools only append references, assets, targets, moments,
-selections, or board membership, or enrich descriptive reference fields. There
-are no delete, remove, reset, import, reorder, or arbitrary workspace-write
-tools. Supply `expectedRevision` when coordinating multiple agents; stale
-mutations return `REVISION_CONFLICT` instead of overwriting newer state.
+direction. To bootstrap an empty workspace, call the additive-only
+`create_project` tool with a required `title`, an optional `brief`, and an
+optional `expectedRevision`; it returns the committed `revision` and created
+Project entity. Other write tools only append references, assets, targets,
+moments, selections, or board membership, or enrich descriptive reference
+fields. There are no update/delete Project tools or delete, remove, reset,
+import, reorder, or arbitrary workspace-write tools. Supply `expectedRevision`
+when coordinating multiple agents; stale mutations return `REVISION_CONFLICT`
+instead of overwriting newer state.
 The `request_website_capture` tool is an explicitly open-world, non-destructive
 action: it accepts an existing Reference ID and bounded capture settings, then
 uses only that Reference's stored source URL.
