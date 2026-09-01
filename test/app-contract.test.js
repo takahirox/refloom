@@ -24,7 +24,7 @@ test('UI saves before capture and does not auto-capture URL edits or non-URL imp
 
 test('Reference cards expose safe website links in a new tab', async () => {
   const source = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
-  assert.match(source, /text: 'Visit website'/);
+  assert.match(source, /title: 'Open source website in a new tab'/);
   assert.match(source, /target: '_blank'/);
   assert.match(source, /rel: 'noopener noreferrer'/);
   assert.match(source, /safeExternalWebsiteUrl\(reference\.sourceUrl\)/);
@@ -91,4 +91,81 @@ test('UI refresh introduces no external assets or inline style mechanisms', asyn
   assert.deepEqual([...html.matchAll(/<script[^>]*>/g)].map(match => match[0]), ['<script type="module" src="/src/app.js">']);
   assert.doesNotMatch(html, /<style|\sstyle=|https?:\/\/(?!example\.com)/);
   assert.doesNotMatch(css, /@import|@font-face|url\(/);
+});
+
+test('reference card media is the dominant source affordance with a layered top-right cue', async () => {
+  const [source, css] = await Promise.all([read('src/app.js'), read('public/styles.css')]);
+  const card = source.slice(source.indexOf('const preview = await mediaPreview(previewAsset)'), source.indexOf('cards.push(card)'));
+  assert.match(card, /const mediaLink = websiteUrl && !isVideoPreview \? element\('a', \{/);
+  assert.match(card, /className: 'media-link', href: websiteUrl, target: '_blank', rel: 'noopener noreferrer',/);
+  assert.match(card, /\}, \[preview, sourceCue\(\)\]\) : null;/);
+  assert.match(card, /className: 'card-media' \}, \[mediaLink \?\? preview, sourceLink, captureBadge\]\)/);
+  assert.match(source, /className: 'media-source', 'aria-hidden': 'true'/);
+  assert.match(source, /className: 'external-cue', text: '↗'/);
+  for (const rule of [
+    '.card-media{position:relative', '.media-link{display:block',
+    '.media-link>.media-source,.source-link{position:absolute;z-index:2;top:.5rem;right:.5rem}'
+  ]) assert.ok(css.includes(rule), `missing ${rule}`);
+});
+
+test('video previews keep native controls and gain a separate top-right source control', async () => {
+  const [source, css] = await Promise.all([read('src/app.js'), read('public/styles.css')]);
+  assert.match(source, /const isVideoPreview = preview\.classList\.contains\('video'\)/);
+  const link = source.slice(source.indexOf('const sourceLink = websiteUrl && isVideoPreview'), source.indexOf('const card = element'));
+  assert.match(link, /className: 'source-link', href: websiteUrl, target: '_blank', rel: 'noopener noreferrer',/);
+  assert.match(link, /'aria-label': sourceName\n\s*\}, \[sourceCue\(\)\]\) : null;/);
+  assert.match(source, /className: 'preview video', src: url, controls: ''/);
+  assert.ok(css.includes('.source-link{display:block'), 'missing .source-link chip rule');
+});
+
+test('reference card footer is one compact row with an accented select and icon controls', async () => {
+  const [source, css] = await Promise.all([read('src/app.js'), read('public/styles.css')]);
+  const footer = source.slice(source.indexOf("element('footer', { className: 'card-actions' }"), source.indexOf('cards.push(card)'));
+  assert.match(footer, /\[\n\s*select,\n\s*element\('div', \{ className: 'card-tools' \}, \[edit, moreToggle, morePanel\]\)\n\s*\]/);
+  assert.doesNotMatch(footer, /card-secondary|visitWebsite|Visit website/);
+  assert.match(source, /className: 'primary card-select', text: 'Select for board'/);
+  assert.match(source, /className: 'icon-button', title: 'Edit details', 'aria-label': [^\n]*Edit details for/);
+  assert.match(source, /className: 'icon-glyph', 'aria-hidden': 'true', text: glyph/);
+  for (const rule of [
+    '.card-actions{display:flex;align-items:center;justify-content:space-between',
+    '.card-tools{position:relative;display:flex', '.icon-glyph{'
+  ]) assert.ok(css.includes(rule), `missing ${rule}`);
+});
+
+test('the More disclosure overlays upward inside the card instead of growing it', async () => {
+  const [source, css] = await Promise.all([read('src/app.js'), read('public/styles.css')]);
+  assert.match(source, /className: 'more-panel', id: [^\n]*\}, \[add, websiteCapture, cancelCapture, remove\]/);
+  assert.match(source, /morePanel\.hidden = true;/);
+  assert.match(source, /className: 'icon-button more-toggle', 'aria-expanded': 'false', 'aria-controls': morePanel\.id, title: 'More actions'/);
+  assert.match(source, /moreToggle\.setAttribute\('aria-expanded', String\(expanded\)\)/);
+  const panel = css.slice(css.indexOf('.more-panel{'), css.indexOf('.more-panel button'));
+  for (const rule of ['position:absolute', 'right:0', 'bottom:calc(100% + .5rem)', 'z-index:4']) assert.ok(panel.includes(rule), `missing ${rule}`);
+  assert.doesNotMatch(css, /\.reference-card\{[^}]*overflow:hidden/);
+  assert.ok(css.includes('.more-panel .danger'), 'destructive styling must survive inside the menu');
+});
+
+test('capture state renders as a media badge that assistive technology still reads', async () => {
+  const [source, css] = await Promise.all([read('src/app.js'), read('public/styles.css')]);
+  const badge = source.slice(source.indexOf('const captureBadge ='), source.indexOf('const cancelCapture ='));
+  assert.match(badge, /className: 'capture-status capture-badge',/);
+  assert.match(badge, /text: [^\n]*Capture status: /);
+  assert.doesNotMatch(badge, /aria-hidden|sr-only/);
+  const body = source.slice(source.indexOf("className: 'card-body'"), source.indexOf("className: 'card-actions'"));
+  assert.doesNotMatch(body, /captureBadge|captureStatus/);
+  const rule = css.slice(css.indexOf('.capture-badge{'), css.indexOf('}', css.indexOf('.capture-badge{')));
+  for (const declaration of ['position:absolute', 'top:.5rem', 'left:.5rem']) assert.ok(rule.includes(declaration), `missing ${declaration}`);
+});
+
+test('reference card controls keep 44px targets, responsive spacing, and theme hooks', async () => {
+  const css = await read('public/styles.css');
+  for (const rule of [
+    '.icon-button{width:2.75rem;min-width:2.75rem;min-height:2.75rem', '.card-select{min-height:2.75rem',
+    '.media-source{display:grid;place-items:center;width:2.75rem;height:2.75rem',
+    '.more-panel button{justify-content:flex-start;min-height:2.75rem'
+  ]) assert.ok(css.includes(rule), `missing ${rule}`);
+  const small = css.slice(css.indexOf('@media(max-width:600px)'), css.indexOf('@media(prefers-reduced-motion'));
+  for (const rule of ['.card-actions{gap:.4rem', '.card-select{padding:', '.more-panel{min-width:11rem}']) assert.ok(small.includes(rule), `missing responsive ${rule}`);
+  assert.ok(css.slice(css.indexOf('@media(max-width:800px)')).includes('.reference-card .card-tools{'), 'missing 800px card tool spacing');
+  const dark = css.slice(css.indexOf('@media(prefers-color-scheme:dark)'));
+  for (const rule of ['.more-panel{background:', '.media-source{background:', '.capture-badge{background:']) assert.ok(dark.includes(rule), `missing dark ${rule}`);
 });

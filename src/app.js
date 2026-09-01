@@ -296,6 +296,18 @@ async function mediaPreview(asset) {
   } catch { return element('div', { className: 'placeholder', text: 'Binary unavailable' }); }
 }
 
+function sourceCue() {
+  return element('span', { className: 'media-source', 'aria-hidden': 'true' }, [
+    element('span', { className: 'external-cue', text: '↗' })
+  ]);
+}
+
+function iconControl(options, glyph) {
+  return element('button', { type: 'button', ...options }, [
+    element('span', { className: 'icon-glyph', 'aria-hidden': 'true', text: glyph })
+  ]);
+}
+
 async function renderLibrary() {
   const query = $('#library-search').value.trim().toLowerCase();
   const references = projectItems('references').filter(reference => [reference.title, reference.sourceUrl, reference.creator, reference.notes].filter(Boolean).join(' ').toLowerCase().includes(query));
@@ -303,16 +315,14 @@ async function renderLibrary() {
   for (const reference of references) {
     const assets = workspace.assets.filter(asset => asset.referenceId === reference.id);
     const previewAsset = assets.find(asset => blobIdFromLocator(asset.locator)) ?? assets[0];
-    const edit = element('button', { type: 'button', text: 'Edit details' });
+    const name = displayReference(reference);
+    const edit = iconControl({
+      className: 'icon-button', title: 'Edit details', 'aria-label': `Edit details for ${name}`
+    }, '✎');
     edit.addEventListener('click', () => referenceEditor(reference));
     const add = element('button', { type: 'button', text: 'Add assets' });
     add.addEventListener('click', () => { $('#file-input').dataset.referenceId = reference.id; $('#file-input').click(); });
     const websiteUrl = safeExternalWebsiteUrl(reference.sourceUrl);
-    const visitWebsite = websiteUrl ? element('a', {
-      className: 'button', href: websiteUrl, target: '_blank', rel: 'noopener noreferrer',
-      'aria-label': `Visit ${displayReference(reference)} website (opens in a new tab)`,
-      text: 'Visit website'
-    }) : null;
     const websiteCapture = reference.sourceUrl ? element('button', { type: 'button', text: assets.some(asset => asset.provenance?.captureStrategy) ? 'Recapture website' : 'Capture website' }) : null;
     websiteCapture?.addEventListener('click', () => captureWebsite(reference.id, {
       width: 1440, height: 900, checkpoints: 3, readinessMs: 1000, settleMs: 500, maxRedirects: 10
@@ -321,8 +331,8 @@ async function renderLibrary() {
     if (websiteCapture && captureState && ['queued', 'capturing'].includes(captureState.status)) {
       websiteCapture.disabled = true;
     }
-    const captureStatus = captureState ? element('p', {
-      className: 'meta capture-status',
+    const captureBadge = captureState ? element('p', {
+      className: 'capture-status capture-badge',
       text: `Capture status: ${captureState.cancelRequested
         ? 'Cancelling' : captureLabels[captureState.status] || captureState.status}${
         captureState.code ? ` (${captureState.code})` : ''}`
@@ -337,33 +347,44 @@ async function renderLibrary() {
         announce('Website capture cancellation requested');
       } catch (error) { announce(error.message, true); }
     });
-    const select = element('button', { type: 'button', className: 'primary card-primary', text: 'Select for board' });
+    const select = element('button', { type: 'button', className: 'primary card-select', text: 'Select for board' });
     select.addEventListener('click', () => selectionEditor(reference));
     const remove = element('button', { type: 'button', className: 'danger', text: 'Delete' });
     remove.addEventListener('click', async () => {
-      if (!await confirmAction(`Delete “${displayReference(reference)}” and all its assets and selections?`)) return;
+      if (!await confirmAction(`Delete “${name}” and all its assets and selections?`)) return;
       await commit(deleteReference(workspace, reference.id), [], 'Reference deleted');
     });
-    const morePanel = element('div', { className: 'more-panel', id: `more-${reference.id}` }, [add, websiteCapture, remove]);
+    const morePanel = element('div', { className: 'more-panel', id: `more-${reference.id}` }, [add, websiteCapture, cancelCapture, remove]);
     morePanel.hidden = true;
-    const moreToggle = element('button', { type: 'button', className: 'more-toggle', 'aria-expanded': 'false', 'aria-controls': morePanel.id, text: 'More' });
+    const moreToggle = iconControl({
+      className: 'icon-button more-toggle', 'aria-expanded': 'false', 'aria-controls': morePanel.id, title: 'More actions', 'aria-label': `More actions for ${name}`
+    }, '⋯');
     moreToggle.addEventListener('click', () => {
       const expanded = morePanel.hidden;
       morePanel.hidden = !expanded;
       moreToggle.setAttribute('aria-expanded', String(expanded));
     });
+    const preview = await mediaPreview(previewAsset);
+    const isVideoPreview = preview.classList.contains('video');
+    const sourceName = `Open the ${name} source website in a new tab`;
+    const mediaLink = websiteUrl && !isVideoPreview ? element('a', {
+      className: 'media-link', href: websiteUrl, target: '_blank', rel: 'noopener noreferrer',
+      title: 'Open source website in a new tab', 'aria-label': sourceName
+    }, [preview, sourceCue()]) : null;
+    const sourceLink = websiteUrl && isVideoPreview ? element('a', {
+      className: 'source-link', href: websiteUrl, target: '_blank', rel: 'noopener noreferrer',
+      title: 'Open source website in a new tab', 'aria-label': sourceName
+    }, [sourceCue()]) : null;
     const card = element('article', { className: 'reference-card' }, [
-      element('div', { className: 'card-media' }, [await mediaPreview(previewAsset)]),
+      element('div', { className: 'card-media' }, [mediaLink ?? preview, sourceLink, captureBadge]),
       element('div', { className: 'card-body' }, [
-        element('h2', { className: 'card-title', text: displayReference(reference) }),
+        element('h2', { className: 'card-title', text: name }),
         element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
-        captureStatus,
         reference.notes ? element('p', { className: 'card-note', text: reference.notes }) : null
       ]),
-      element('div', { className: 'card-actions' }, [
+      element('footer', { className: 'card-actions' }, [
         select,
-        element('div', { className: 'actions' }, [visitWebsite, edit, cancelCapture]),
-        element('div', { className: 'card-more' }, [moreToggle, morePanel])
+        element('div', { className: 'card-tools' }, [edit, moreToggle, morePanel])
       ])
     ]);
     cards.push(card);
