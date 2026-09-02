@@ -2,6 +2,14 @@ import { Buffer } from 'node:buffer';
 import { PERCEPTUAL_METRIC_VERSION, perceptualChangeScore } from './perceptual-image.js';
 import { validateGuidedActions } from './guided-interaction.js';
 import { runGuidedActions } from './guided-executor.js';
+import { PAGE_WEBGL_RUNTIME_HOOK as EXPANDED_WEBGL_RUNTIME_HOOK } from './webgl-page-runtime.js';
+import { PAGE_WEBGL_SURFACE_EXPRESSION } from './webgl-surface-expression.js';
+import {
+  normalizeWebGlSurfaces, selectWebGlSurface, webGlSurfaceWarnings
+} from './webgl-surfaces.js';
+
+export const PAGE_WEBGL_RUNTIME_HOOK = EXPANDED_WEBGL_RUNTIME_HOOK;
+export const PAGE_WEBGL_OBSERVATION_EXPRESSION = PAGE_WEBGL_SURFACE_EXPRESSION;
 
 export const PASSIVE_BLOCKED_ACTIONS = Object.freeze([
   'click', 'keyboard', 'pointer', 'form', 'wallet', 'permission',
@@ -183,7 +191,7 @@ export function selectRepresentativeMoments(samples, initial, count) {
   return representatives.sort((left, right) => left.index - right.index);
 }
 
-export const PAGE_WEBGL_RUNTIME_HOOK = `(() => {
+const LEGACY_PAGE_WEBGL_RUNTIME_HOOK = `(() => {
   const state = { webGlContextFailure: false, contexts: [], drawCalls: 0 };
   Object.defineProperty(globalThis, Symbol.for('refloom.pageRuntimeDiagnostic'), { value: state });
   const original = HTMLCanvasElement.prototype.getContext;
@@ -220,7 +228,7 @@ export const PAGE_RUNTIME_DIAGNOSTIC_EXPRESSION = `Boolean(
   globalThis[Symbol.for('refloom.pageRuntimeDiagnostic')]?.webGlContextFailure
 )`;
 
-export const PAGE_WEBGL_OBSERVATION_EXPRESSION = `(() => {
+const LEGACY_PAGE_WEBGL_OBSERVATION_EXPRESSION = `(() => {
   const state = globalThis[Symbol.for('refloom.pageRuntimeDiagnostic')];
   const contexts = state?.contexts || [];
   return [...document.querySelectorAll('canvas')].map((canvas, domIndex) => {
@@ -243,6 +251,36 @@ export const PAGE_WEBGL_OBSERVATION_EXPRESSION = `(() => {
     };
   });
 })()`;
+
+function surfaceObservation(value) {
+  const envelope = Array.isArray(value) ? {
+    surfaces: value.map((item, domIndex) => ({
+      frameId: 'main-frame', frameUrl: 'about:blank', originClass: 'main',
+      surfaceType: 'html-canvas', selector: item.selector ?? `canvas:nth-of-type(${domIndex + 1})`,
+      targetIdentity: item.selector ?? `canvas-${domIndex}`,
+      observationMethod: 'legacy-main-runtime', bounds: item.bounds,
+      visible: Boolean(item.visible), webglContext: Boolean(item.webglContext),
+      drawCalls: Number.isSafeInteger(item.drawCalls) && item.drawCalls >= 0 ? item.drawCalls : 0,
+      supported: Boolean(item.webglContext), domIndex: item.domIndex ?? domIndex, depth: 0,
+      ...(item.contextType === undefined ? {} : { contextType: item.contextType })
+    })),
+    warnings: []
+  } : value;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) ||
+      !Array.isArray(envelope.surfaces) || !Array.isArray(envelope.warnings) ||
+      envelope.warnings.some(warning => typeof warning !== 'string' || warning.length > 80)) {
+    throw new TypeError('Invalid WebGL surface observation');
+  }
+  const surfaces = normalizeWebGlSurfaces(envelope.surfaces.map(surface => {
+    if (!Object.hasOwn(surface, 'contextType')) return surface;
+    const { contextType: _contextType, ...record } = surface;
+    return record;
+  }));
+  return {
+    surfaces,
+    warnings: [...new Set([...envelope.warnings, ...webGlSurfaceWarnings(surfaces)])]
+  };
+}
 
 export async function observeInteractiveAuto(cdp, options) {
   const settings = validateInteractiveAutoSettings(options);
@@ -270,12 +308,15 @@ export async function observeInteractiveAuto(cdp, options) {
   for (let index = 0; index < totalSamples; index += 1) {
     options.active();
     try {
-      const canvases = await options.bounded(
+      const observed = surfaceObservation(await options.bounded(
         cdp.evaluate(PAGE_WEBGL_OBSERVATION_EXPRESSION), options.checkpointMs
-      );
-      sawVisibleCanvas ||= Array.isArray(canvases) && canvases.some(item => item.visible);
-      sawWebGlContext ||= Array.isArray(canvases) && canvases.some(item => item.webglContext);
-      const targetCanvas = selectTargetCanvas(canvases);
+      ));
+      for (const warning of observed.warnings) {
+        if (warning !== 'no_supported_surface' && !warnings.includes(warning)) warnings.push(warning);
+      }
+      sawVisibleCanvas ||= observed.surfaces.some(item => item.visible);
+      sawWebGlContext ||= observed.surfaces.some(item => item.webglContext);
+      const targetCanvas = selectWebGlSurface(observed.surfaces);
       if (targetCanvas) {
         assertPassiveAutomationAction('capture');
         const clip = { ...targetCanvas.bounds, scale: 1 };
@@ -315,7 +356,9 @@ export async function observeInteractiveAuto(cdp, options) {
   }
   if (!samples.length) {
     if (observationFailure) throw observationFailure;
-    warnings.push(!sawVisibleCanvas ? 'no_visible_canvas' : !sawWebGlContext ? 'non_webgl_canvas' : 'webgl_inactive');
+    if (!warnings.some(warning => warning.startsWith('unsupported_') || warning.startsWith('worker_'))) {
+      warnings.push(!sawVisibleCanvas ? 'no_visible_canvas' : !sawWebGlContext ? 'non_webgl_canvas' : 'webgl_inactive');
+    }
     return { screenshots: [], autoCapture: {
       interactionMode: settings.interactionMode, completionStatus: 'complete', warnings,
       observedSamples: 0, selectedMoments: 0,
