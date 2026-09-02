@@ -138,6 +138,7 @@ export async function runGuidedActions(actions, options) {
       );
       if (!validSnapshot(snapshot)) throw new TypeError('snapshot');
     } catch {
+      snapshot = undefined;
       if (validatedActions.length > 0) appendFailure(validatedActions[0], 'snapshot_failed');
     }
 
