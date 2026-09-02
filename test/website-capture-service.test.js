@@ -193,6 +193,7 @@ test('preserves passive auto provenance and useful partial completion', async ()
     stabilityCriteria: { samples: 3, threshold: 0.015, intervalMs: 500 },
     selectionReason: 'initial_stable',
     selectionScore: 0.01,
+    visualMetric: { version: 'perceptual-grid-v1', threshold: 0.015, grid: 'max-16x16-ycbcr' },
     warnings: ['render_failure'],
     blockedActions: ['click'],
     completionStatus: 'partial',
@@ -218,6 +219,10 @@ test('preserves passive auto provenance and useful partial completion', async ()
     (await store.load()).workspace.moments[0].state.targetCanvas.selector,
     '#scene'
   );
+  const { workspace } = await store.load();
+  const visualMetric = { version: 'perceptual-grid-v1', threshold: 0.015, grid: 'max-16x16-ycbcr' };
+  assert.deepEqual(workspace.assets[0].provenance.visualMetric, visualMetric);
+  assert.deepEqual(workspace.moments[0].state.visualMetric, visualMetric);
 });
 
 test('failure before the first callback leaves the reference unchanged', async () => {

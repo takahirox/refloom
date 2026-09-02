@@ -57,6 +57,7 @@ function appendCheckpoint(workspace, referenceId, screenshot, entityIds, reuseAs
     ...(screenshot.stabilityCriteria === undefined ? {} : { stabilityCriteria: screenshot.stabilityCriteria }),
     ...(screenshot.selectionReason === undefined ? {} : { selectionReason: screenshot.selectionReason }),
     ...(screenshot.selectionScore === undefined ? {} : { selectionScore: screenshot.selectionScore }),
+    ...(screenshot.visualMetric === undefined ? {} : { visualMetric: structuredClone(screenshot.visualMetric) }),
     ...(screenshot.warnings === undefined ? {} : { warnings: screenshot.warnings }),
     ...(screenshot.blockedActions === undefined ? {} : { blockedActions: screenshot.blockedActions }),
     ...(screenshot.completionStatus === undefined ? {} : { completionStatus: screenshot.completionStatus }),
