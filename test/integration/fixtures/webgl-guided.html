@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Deterministic guided WebGL fixture</title>
+  <style>
+    html, body { margin: 0; background: #080b16; color: #f5f7ff; font: 16px sans-serif; }
+    main { padding: 24px; }
+    canvas { display: block; width: 640px; height: 360px; }
+    #status { margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <button type="button" aria-label="Start" id="start">Start</button>
+    <div id="status" role="status">Ready to start.</div>
+  </main>
+  <script>
+    const gate = document.querySelector('#start');
+    const status = document.querySelector('#status');
+
+    gate.addEventListener('click', () => {
+      gate.remove();
+      const canvas = document.createElement('canvas');
+      canvas.id = 'scene';
+      canvas.width = 640;
+      canvas.height = 360;
+      document.querySelector('main').append(canvas);
+
+      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+      if (!gl) {
+        status.textContent = 'WebGL unavailable.';
+        return;
+      }
+
+      let frame = 0;
+      status.textContent = 'Rendering frame 0.';
+      function render() {
+        const phase = (frame % 24) / 23;
+        gl.clearColor(phase, 0.2, 1 - phase, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        frame += 1;
+        status.textContent = `Rendering frame ${frame}.`;
+        if (frame < 48) setTimeout(render, 100);
+      }
+      render();
+    }, { once: true });
+  </script>
+</body>
+</html>
