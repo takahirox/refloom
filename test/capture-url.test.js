@@ -44,3 +44,22 @@ test('requires every DNS answer to be public', async () => {
   ];
   await assert.rejects(normalizeCaptureUrl('https://example.com', { resolver }), { message: CAPTURE_ERROR });
 });
+
+test('loopback policy is explicit, HTTP-only, and limited to high development ports', async () => {
+  const local = await normalizeCaptureUrl('http://localhost:5173/app', { policy: 'loopback' });
+  assert.equal(local.href, 'http://localhost:5173/app');
+  assert.deepEqual(local.answers, [{ address: '127.0.0.1', family: 4 }]);
+  for (const input of [
+    'http://localhost/', 'http://localhost:80/', 'https://localhost:5173/',
+    'http://127.0.0.2:5173/', 'http://192.168.1.2:5173/',
+    'http://example.com:5173/'
+  ]) {
+    await assert.rejects(normalizeCaptureUrl(input, { policy: 'loopback' }), { message: CAPTURE_ERROR });
+  }
+});
+
+test('public policy still rejects loopback even on an allowed public port', async () => {
+  await assert.rejects(normalizeCaptureUrl('http://127.0.0.1/', { policy: 'public' }), {
+    message: CAPTURE_ERROR
+  });
+});

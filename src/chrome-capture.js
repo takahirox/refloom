@@ -315,13 +315,13 @@ export async function captureWebsite(input, options = {}) {
   options.signal?.addEventListener?.('abort', abort, { once: true });
 
   const work = (async () => {
-    const target = await normalizeCaptureUrl(input, { resolver: options.resolver });
+    const target = await normalizeCaptureUrl(input, { resolver: options.resolver, policy: options.urlPolicy });
     active();
     const executable = await findChrome(options.executable, fs.access);
     active();
     profile = await fs.mkdtemp(path.join(options.tmpdir || tmpdir(), 'refloom-capture-'));
     active();
-    proxy = makeProxy({ ...options.proxyOptions, resolver: options.resolver });
+    proxy = makeProxy({ ...options.proxyOptions, resolver: options.resolver, urlPolicy: options.urlPolicy });
     const address = await proxy.listen();
     active();
     const args = [
@@ -404,7 +404,7 @@ export async function captureWebsite(input, options = {}) {
     })`);
     if (!metrics || typeof metrics.url !== 'string' || typeof metrics.title !== 'string' ||
         ![metrics.width, metrics.height, metrics.viewportWidth, metrics.viewportHeight].every(value => Number.isFinite(value) && value > 0)) throw new Error(CAPTURE_ERROR);
-    const final = await normalizeCaptureUrl(metrics.url, { resolver: options.resolver });
+    const final = await normalizeCaptureUrl(metrics.url, { resolver: options.resolver, policy: options.urlPolicy });
     const capturedAt = options.now?.() || new Date().toISOString();
     const strategy = {
       scroll: 'deterministic-scroll', viewport: 'viewport', 'full-page': 'full-page',

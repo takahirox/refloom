@@ -161,3 +161,35 @@ always reloaded as authoritative input.
 
 Video, animation recording, scripted interaction, semantic state detection,
 and assisted-motion capture are deliberately deferred.
+
+## External-agent implementation preview loop
+
+MCP agents can inspect an implementation without adding it to the Reference
+library. Call `capture_implementation_preview` with a URL and the same bounded
+viewport, responsive preset, and mode settings used by durable capture. Poll
+`get_implementation_preview` with the returned opaque capture ID, then read each
+returned `refloom://preview/...` resource. Each resource includes its expiry and
+the original/final URL, viewport, preset, mode, captured region, checkpoint,
+capture time, method, and strategy needed to reproduce the observation.
+
+The intended external loop is:
+
+1. Read Refloom Creative Direction and registered reference media.
+2. Change the implementation in the agent's own coding workspace.
+3. Start and poll an implementation preview capture.
+4. Read the temporary screenshots, evaluate them externally, and repeat.
+5. Cancel obsolete work with `cancel_implementation_preview`.
+
+Preview bytes and metadata are process-local memory only. They are never Assets,
+References, Targets, Moments, workspace commits, object-store objects, or entries
+in durable resource discovery. Completed and failed jobs expire after five
+minutes; process shutdown cancels work and releases all bytes. The service also
+bounds active and retained jobs, resource count, aggregate bytes, individual PNG
+bytes, Chromium runtime, network bytes, connections, checkpoints, and viewports.
+
+Public mode retains the existing public-host and conventional-port policy.
+Loopback mode must be selected explicitly and accepts only plain HTTP on an
+explicit unprivileged port for exactly `localhost`, `127.0.0.1`, or `::1`.
+Every navigation, redirect, subresource, and WebSocket request remains under that
+same local-only policy, so loopback preview cannot silently reach public or LAN
+destinations. Public failures remain generic and never disclose local paths.

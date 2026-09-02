@@ -14,6 +14,7 @@ import {
 import { listReferenceTagSuggestions } from './src/reference-library.js';
 import { CaptureScheduler } from './src/capture-scheduler.js';
 import { captureReference as defaultCaptureReference } from './src/website-capture-service.js';
+import { EphemeralPreviewService, PREVIEW_MEDIA_URI } from './src/ephemeral-preview-service.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
 const MAX_LINE_BYTES = 32 * 1024 * 1024;
@@ -66,9 +67,12 @@ const tools = [
     }), 'referenceId')
   },
   { name: 'get_capture_status', description: 'Get the process-local status of a queued, running, or recent website capture.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128) }), 'referenceId') },
-  { name: 'cancel_website_capture', description: 'Cancel a queued or running website capture without deleting its Reference or completed checkpoints.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128) }), 'referenceId') }
+  { name: 'cancel_website_capture', description: 'Cancel a queued or running website capture without deleting its Reference or completed checkpoints.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128) }), 'referenceId') },
+  { name: 'capture_implementation_preview', description: 'Start an ephemeral implementation preview capture without creating a Reference or changing the workspace.', inputSchema: required(objectSchema({ url: string('Absolute public URL, or an explicit loopback development URL', 2048), urlPolicy: { type: 'string', enum: ['public', 'loopback'] }, settings: objectSchema({ preset: { type: 'string', enum: ['desktop', 'tablet', 'mobile'] }, mode: { type: 'string', enum: ['viewport', 'full-page', 'section', 'hero', 'scroll'] }, selector: string('Optional CSS selector for section capture', 256), width: { type: 'integer', minimum: 320, maximum: 2560 }, height: { type: 'integer', minimum: 320, maximum: 1440 }, checkpoints: { type: 'integer', minimum: 1, maximum: 5 }, readinessMs: { type: 'integer', minimum: 0, maximum: 15000 }, settleMs: { type: 'integer', minimum: 0, maximum: 2000 }, maxRedirects: { type: 'integer', minimum: 0, maximum: 20 } }) }), 'url') },
+  { name: 'get_implementation_preview', description: 'Get status and temporary resource URIs for an implementation preview capture.', inputSchema: required(objectSchema({ captureId: string('Opaque preview capture ID', 128) }), 'captureId') },
+  { name: 'cancel_implementation_preview', description: 'Cancel a queued or running ephemeral implementation preview.', inputSchema: required(objectSchema({ captureId: string('Opaque preview capture ID', 128) }), 'captureId') }
 ];
-const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'list_reference_tags', 'get_reference', 'search_selections', 'get_selection', 'get_creative_direction', 'get_capture_status']);
+const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'list_reference_tags', 'get_reference', 'search_selections', 'get_selection', 'get_creative_direction', 'get_capture_status', 'get_implementation_preview']);
 for (const tool of tools) tool.annotations = {
   title: tool.name.replaceAll('_', ' '),
   readOnlyHint: readTools.has(tool.name),
@@ -85,6 +89,10 @@ tools.find(tool => tool.name === 'create_reference').annotations.openWorldHint =
 tools.find(tool => tool.name === 'cancel_website_capture').annotations = {
   title: 'cancel website capture', readOnlyHint: false,
   destructiveHint: false, idempotentHint: true, openWorldHint: false
+};
+tools.find(tool => tool.name === 'capture_implementation_preview').annotations = {
+  title: 'capture implementation preview', readOnlyHint: false,
+  destructiveHint: false, idempotentHint: false, openWorldHint: true
 };
 const toolsByName = new Map(tools.map(tool => [tool.name, tool]));
 
@@ -184,6 +192,7 @@ function mediaResource(asset) {
 export function createMcpServer(options = {}) {
   const store = options.store ?? createPersistenceRepository({ env: options.env ?? process.env }).repository;
   const diagnostics = options.diagnostics ?? process.stderr;
+  const previewService = options.previewService ?? new EphemeralPreviewService();
   const captureReference = options.captureReference ?? defaultCaptureReference;
   const captureScheduler = options.captureScheduler ?? new CaptureScheduler({
     store,
@@ -204,6 +213,7 @@ export function createMcpServer(options = {}) {
 
   function close() {
     return closing ??= Promise.resolve()
+      .then(() => previewService.close())
       .then(() => captureScheduler.close())
       .then(() => store.close());
   }
@@ -227,6 +237,9 @@ export function createMcpServer(options = {}) {
   async function callTool(name, raw) {
     const args = record(raw ?? {}, 'arguments');
     validateArguments(name, args);
+    if (name === 'capture_implementation_preview') return previewService.request(args);
+    if (name === 'get_implementation_preview') return previewService.status(args.captureId);
+    if (name === 'cancel_implementation_preview') return previewService.cancel(args.captureId);
     if (name === 'request_website_capture') {
       const requestValue = normalizeCaptureRequest(args);
       const capture = await captureScheduler.request(requestValue.referenceId, requestValue.settings);
@@ -414,9 +427,13 @@ export function createMcpServer(options = {}) {
       const items = resources.slice(start, start + MAX_LIMIT);
       return { resources: items, ...(start + items.length < resources.length ? { nextCursor: String(start + items.length) } : {}) };
     }
-    if (method === 'resources/templates/list') return { resourceTemplates: [{ uriTemplate: `${MEDIA_URI}{mediaId}`, name: 'Registered Refloom media', description: 'Binary content for a media asset referenced by the authoritative workspace' }] };
+    if (method === 'resources/templates/list') return { resourceTemplates: [
+      { uriTemplate: `${MEDIA_URI}{mediaId}`, name: 'Registered Refloom media', description: 'Binary content for a media asset referenced by the authoritative workspace' },
+      { uriTemplate: `${PREVIEW_MEDIA_URI}{mediaId}`, name: 'Temporary implementation preview', description: 'TTL-bound media returned by an explicit implementation preview capture' }
+    ] };
     if (method === 'resources/read') {
       const uri = request.params?.uri;
+      if (typeof uri === 'string' && uri.startsWith(PREVIEW_MEDIA_URI)) return { contents: [previewService.read(uri)] };
       if (typeof uri !== 'string' || !uri.startsWith(MEDIA_URI)) fail('INVALID_RESOURCE_URI', 'Only refloom://media resources are supported');
       const id = decodeURIComponent(uri.slice(MEDIA_URI.length));
       const { workspace } = await store.load();

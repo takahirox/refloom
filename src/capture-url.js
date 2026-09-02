@@ -79,8 +79,22 @@ export async function normalizeCaptureUrl(input, options = {}) {
   } catch {
     fail();
   }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) fail();
+  const policy = options.policy ?? 'public';
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  if (policy === 'loopback') {
+    const normalizedHost = hostname.toLowerCase();
+    const port = Number(url.port);
+    if (url.protocol !== 'http:' || url.username || url.password || url.hash ||
+        !['localhost', '127.0.0.1', '::1'].includes(normalizedHost) ||
+        !url.port || !Number.isSafeInteger(port) || port < 1024 || port > 65_535) fail();
+    const address = normalizedHost === 'localhost' ? '127.0.0.1' : normalizedHost;
+    url.username = '';
+    url.password = '';
+    url.hash = '';
+    return { url, href: url.href, hostname, port, answers: [{ address, family: isIP(address) }] };
+  }
+  if (policy !== 'public') fail();
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) fail();
   if (!hostname || hostname.endsWith('.') ||
       hostname.toLowerCase() === 'localhost' ||
       hostname.toLowerCase().endsWith('.localhost') ||

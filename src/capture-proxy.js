@@ -18,6 +18,7 @@ function cleanHeaders(headers) {
 
 export function createCaptureProxy(options = {}) {
   const resolver = options.resolver;
+  const urlPolicy = options.urlPolicy ?? 'public';
   const connect = options.connect || (settings => net.connect(settings));
   const request = options.request || (settings => http.request(settings));
   const limits = {
@@ -56,7 +57,7 @@ export function createCaptureProxy(options = {}) {
 
   const server = http.createServer(async (clientRequest, clientResponse) => {
     try {
-      const target = await normalizeCaptureUrl(clientRequest.url, { resolver });
+      const target = await normalizeCaptureUrl(clientRequest.url, { resolver, policy: urlPolicy });
       const pinned = target.answers[0];
       const upstream = admit(request({
         protocol: target.url.protocol,
@@ -94,9 +95,9 @@ export function createCaptureProxy(options = {}) {
       const candidate = new URL(req.url);
       if (candidate.protocol !== 'ws:' || String(req.headers.upgrade).toLowerCase() !== 'websocket') throw new Error(CAPTURE_ERROR);
       candidate.protocol = 'http:';
-      const target = await normalizeCaptureUrl(candidate.href, { resolver });
+      const target = await normalizeCaptureUrl(candidate.href, { resolver, policy: urlPolicy });
       const pinned = target.answers[0];
-      upstream = admit(connect({ host: pinned.address, port: 80, family: pinned.family, timeout: limits.connectMs }));
+      upstream = admit(connect({ host: pinned.address, port: target.port, family: pinned.family, timeout: limits.connectMs }));
       upstream.once('connect', () => {
         const headers = { ...cleanHeaders(req.headers), host: target.url.host, connection: 'Upgrade', upgrade: 'websocket' };
         const lines = [`${req.method} ${target.url.pathname}${target.url.search} HTTP/1.1`];
