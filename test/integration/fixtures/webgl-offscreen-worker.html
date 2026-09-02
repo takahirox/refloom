@@ -1,0 +1,14 @@
+<!doctype html><html><body style="margin:0;background:#101828">
+<canvas id="worker-scene" width="640" height="360" style="display:block;width:640px;height:360px"></canvas>
+<div id="status" role="status">Starting worker.</div>
+<script>
+const canvas=document.querySelector('#worker-scene');
+const status=document.querySelector('#status');
+if(!canvas.transferControlToOffscreen){status.textContent='OffscreenCanvas unavailable.'}else{
+  const offscreen=canvas.transferControlToOffscreen();
+  const source=`onmessage=event=>{const canvas=event.data;const gl=canvas.getContext('webgl2')||canvas.getContext('webgl');let frame=0;function render(){const phase=(frame%24)/23;gl.clearColor(1-phase,phase,.4,1);gl.clear(gl.COLOR_BUFFER_BIT);frame+=1;if(frame<60)setTimeout(render,80)}render()}`;
+  const worker=new Worker(URL.createObjectURL(new Blob([source],{type:'text/javascript'})));
+  worker.postMessage(offscreen,[offscreen]);
+  status.textContent='Worker rendering.';
+}
+</script></body></html>

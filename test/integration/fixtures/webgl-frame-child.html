@@ -1,0 +1,9 @@
+<!doctype html><html><body style="margin:0;background:#102030">
+<canvas id="framed-scene" width="600" height="320" style="display:block;width:600px;height:320px"></canvas>
+<script>
+const canvas=document.querySelector('#framed-scene');
+const gl=canvas.getContext('webgl2')||canvas.getContext('webgl');
+let frame=0;
+function render(){const phase=(frame%20)/19;gl.clearColor(phase,.3,1-phase,1);gl.clear(gl.COLOR_BUFFER_BIT);frame+=1;if(frame<60)setTimeout(render,80)}
+render();
+</script></body></html>
