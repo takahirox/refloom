@@ -92,12 +92,16 @@ test('visual change scoring delegates to the perceptual image metric', async () 
   assert.doesNotMatch(source, /function bytes\(/);
 });
 
-test('validation enforces hard observation limits and passive-only automation', () => {
+test('validation enforces hard observation limits and explicit guided automation', () => {
   assert.deepEqual(validateInteractiveAutoSettings({}), {
     interactionMode: 'passive', observationMs: 10_000, sampleIntervalMs: 500,
     representativeMoments: 4, stabilitySamples: 3, stabilityThreshold: 0.015
   });
-  assert.throws(() => validateInteractiveAutoSettings({ interactionMode: 'guided' }), /Only passive/);
+  assert.deepEqual(validateInteractiveAutoSettings({ interactionMode: 'guided', guidedActions: [
+    { type: 'click', role: 'button', label: 'Start' }
+  ] }).guidedActions, [{ type: 'click', role: 'button', label: 'Start' }]);
+  assert.throws(() => validateInteractiveAutoSettings({ guidedActions: [] }), /interactionMode/);
+  assert.throws(() => validateInteractiveAutoSettings({ interactionMode: 'explore' }), /interactionMode/);
   assert.throws(() => validateInteractiveAutoSettings({ observationMs: 30_001 }), /bounded limits/);
   assert.throws(() => validateInteractiveAutoSettings({ observationMs: 10_000, sampleIntervalMs: 100 }), /bounded limits/);
   assert.throws(() => normalizeCaptureRequest({
@@ -105,14 +109,53 @@ test('validation enforces hard observation limits and passive-only automation', 
   }), /invalid/i);
 });
 
-test('passive safety policy blocks every unsafe action and leaves guided/explore disabled', () => {
+test('passive stays restricted while guided exposes only bounded semantic clicks', () => {
   for (const action of PASSIVE_BLOCKED_ACTIONS) {
     assert.throws(() => assertPassiveAutomationAction(action), /Passive capture blocks/);
   }
   for (const action of ['observe', 'wait', 'capture']) assert.equal(assertPassiveAutomationAction(action), true);
   assert.equal(AUTO_ACTION_SCHEMA.modes.passive.enabled, true);
-  assert.equal(AUTO_ACTION_SCHEMA.modes.guided.enabled, false);
+  assert.equal(AUTO_ACTION_SCHEMA.modes.guided.enabled, true);
+  assert.deepEqual(AUTO_ACTION_SCHEMA.modes.guided.allowedActions, ['click', 'observe', 'wait', 'capture']);
   assert.equal(AUTO_ACTION_SCHEMA.modes.explore.enabled, false);
+});
+
+test('guided gates run once before reusing passive WebGL observation', async () => {
+  const snapshots = [
+    { documentUrl: 'https://example.test/game', origin: 'https://example.test' },
+    { documentUrl: 'https://example.test/game', origin: 'https://example.test' }
+  ];
+  let nowIndex = 0;
+  const cdp = {
+    evaluate: async expression => {
+      if (expression.includes('const wanted =')) return {
+        outcome: 'executed', policyReason: 'allowed', role: 'button', label: 'Start',
+        documentUrl: 'https://example.test/game', origin: 'https://example.test'
+      };
+      if (expression.includes('documentUrl: location.href')) return snapshots.shift();
+      return [{
+        domIndex: 0, selector: '#scene', visible: true, webglContext: true,
+        contextType: 'webgl2', drawCalls: 3,
+        bounds: { x: 0, y: 0, width: 640, height: 480 }
+      }];
+    },
+    send: async () => ({ data: png('a') })
+  };
+  const result = await observeInteractiveAuto(cdp, {
+    interactionMode: 'guided',
+    guidedActions: [{ type: 'click', role: 'button', label: 'Start' }],
+    observationMs: 1_000, sampleIntervalMs: 500, representativeMoments: 3,
+    stabilitySamples: 2, stabilityThreshold: 0,
+    now: () => [1_000, 1_010][nowIndex++],
+    active() {}, checkpointMs: 100, maxScreenshotBytes: 1_000,
+    maxObservationBytes: 5_000, pause: async () => {}, bounded: promise => promise
+  });
+  assert.equal(result.autoCapture.interactionMode, 'guided');
+  assert.equal(result.autoCapture.automation.actions[0].outcome, 'executed');
+  assert.equal(result.autoCapture.automation.actions[0].relativeTimestampMs, 10);
+  assert.equal(result.screenshots[0].automation.interactionMode, 'guided');
+  assert.ok(!result.screenshots[0].blockedActions.includes('click'));
+  assert.equal(result.autoCapture.observedSamples, 3);
 });
 
 test('bounded observer returns an explicit graceful non-WebGL result', async () => {

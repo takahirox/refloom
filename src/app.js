@@ -332,17 +332,28 @@ function websiteCaptureEditor(reference, control) {
     element('option', { value: 'section', text: 'First main section' }),
     element('option', { value: 'hero', text: 'Hero' })
   ]);
+  const interactionMode = element('select', { id: 'field-interaction-mode', name: 'interactionMode' }, [
+    element('option', { value: 'passive', text: 'Passive · observe only' }),
+    element('option', { value: 'guided', text: 'Guided · exact safe buttons' })
+  ]);
   openEditor('Capture website', [
     element('div', { className: 'field' }, [element('label', { for: 'field-capture-preset', text: 'Responsive preset' }), preset]),
     element('div', { className: 'field' }, [element('label', { for: 'field-capture-mode', text: 'Capture mode' }), mode]),
-    element('p', { className: 'hint', text: 'Interactive Auto passively observes visible WebGL activity for a bounded period. It never clicks, types, points, submits forms, opens wallets or permissions, uploads, purchases, or navigates.' })
+    element('div', { className: 'field' }, [element('label', { for: 'field-interaction-mode', text: 'Interactive Auto behavior' }), interactionMode]),
+    field('Exact guided button labels (comma-separated)', 'guidedLabels', '', { placeholder: 'English, Start' }),
+    element('p', { className: 'hint', text: 'Passive only observes. Guided may click at most three exact semantic buttons for safe language/start gates within five seconds; forms, accounts, wallets, purchases, uploads, permissions, downloads, and cross-origin changes remain blocked.' })
   ], data => captureWebsite(reference.id, {
     preset: data.get('preset'), mode: data.get('mode'), readinessMs: 1000,
     settleMs: 500, maxRedirects: 10,
     ...(data.get('mode') === 'interactive-auto' ? {
-      interactionMode: 'passive', observationMs: 10_000,
+      interactionMode: data.get('interactionMode'), observationMs: 10_000,
       sampleIntervalMs: 500, representativeMoments: 4,
-      stabilitySamples: 3, stabilityThreshold: 0.015
+      stabilitySamples: 3, stabilityThreshold: 0.015,
+      ...(data.get('interactionMode') === 'guided' ? {
+        guidedActions: String(data.get('guidedLabels') || '').split(',')
+          .map(label => label.trim()).filter(Boolean).slice(0, 3)
+          .map(label => ({ type: 'click', role: 'button', label }))
+      } : {})
     } : {})
   }, control));
 }

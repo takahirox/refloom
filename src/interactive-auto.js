@@ -1,8 +1,15 @@
 import { Buffer } from 'node:buffer';
 import { PERCEPTUAL_METRIC_VERSION, perceptualChangeScore } from './perceptual-image.js';
+import { validateGuidedActions } from './guided-interaction.js';
+import { runGuidedActions } from './guided-executor.js';
 
 export const PASSIVE_BLOCKED_ACTIONS = Object.freeze([
   'click', 'keyboard', 'pointer', 'form', 'wallet', 'permission',
+  'upload', 'purchase', 'navigation'
+]);
+
+export const GUIDED_BLOCKED_ACTIONS = Object.freeze([
+  'keyboard', 'pointer', 'form', 'wallet', 'permission',
   'upload', 'purchase', 'navigation'
 ]);
 
@@ -15,7 +22,7 @@ export const AUTO_ACTION_SCHEMA = Object.freeze({
   ]),
   modes: Object.freeze({
     passive: Object.freeze({ enabled: true, allowedActions: Object.freeze(['observe', 'wait', 'capture']) }),
-    guided: Object.freeze({ enabled: false, allowedActions: Object.freeze([]) }),
+    guided: Object.freeze({ enabled: true, allowedActions: Object.freeze(['click', 'observe', 'wait', 'capture']) }),
     explore: Object.freeze({ enabled: false, allowedActions: Object.freeze([]) })
   })
 });
@@ -94,16 +101,19 @@ export function assertPassiveAutomationAction(type) {
 }
 
 export function validateInteractiveAutoSettings(options = {}) {
-  if (options.interactionMode !== undefined && options.interactionMode !== 'passive') {
-    throw new TypeError('Only passive interactionMode is enabled');
+  const interactionMode = options.interactionMode ?? 'passive';
+  if (!['passive', 'guided'].includes(interactionMode) ||
+      (interactionMode === 'passive' && options.guidedActions !== undefined)) {
+    throw new TypeError('Invalid interactionMode');
   }
   const values = {
-    interactionMode: 'passive',
+    interactionMode,
     observationMs: options.observationMs ?? 10_000,
     sampleIntervalMs: options.sampleIntervalMs ?? 500,
     representativeMoments: options.representativeMoments ?? 4,
     stabilitySamples: options.stabilitySamples ?? 3,
-    stabilityThreshold: options.stabilityThreshold ?? 0.015
+    stabilityThreshold: options.stabilityThreshold ?? 0.015,
+    ...(interactionMode === 'guided' ? { guidedActions: validateGuidedActions(options.guidedActions ?? []) } : {})
   };
   for (const key of ['observationMs', 'sampleIntervalMs', 'representativeMoments', 'stabilitySamples']) {
     if (!Number.isSafeInteger(values[key])) throw new TypeError(`${key} must be an integer`);
@@ -238,6 +248,19 @@ export async function observeInteractiveAuto(cdp, options) {
   const settings = validateInteractiveAutoSettings(options);
   const samples = [];
   const warnings = [];
+  let guidedAutomation;
+  if (settings.interactionMode === 'guided') {
+    guidedAutomation = settings.guidedActions.length
+      ? await runGuidedActions(settings.guidedActions, {
+        cdp,
+        now: options.now ?? Date.now,
+        active: options.active,
+        bounded: options.bounded,
+        checkpointMs: options.checkpointMs
+      })
+      : Object.freeze({ schemaVersion: 1, interactionMode: 'guided', actions: Object.freeze([]), warnings: Object.freeze([]) });
+    warnings.push(...guidedAutomation.warnings);
+  }
   let sawVisibleCanvas = false;
   let sawWebGlContext = false;
   let renderFailure = false;
@@ -294,10 +317,13 @@ export async function observeInteractiveAuto(cdp, options) {
     if (observationFailure) throw observationFailure;
     warnings.push(!sawVisibleCanvas ? 'no_visible_canvas' : !sawWebGlContext ? 'non_webgl_canvas' : 'webgl_inactive');
     return { screenshots: [], autoCapture: {
-      interactionMode: 'passive', completionStatus: 'complete', warnings,
-      observedSamples: 0, selectedMoments: 0, blockedActions: PASSIVE_BLOCKED_ACTIONS,
+      interactionMode: settings.interactionMode, completionStatus: 'complete', warnings,
+      observedSamples: 0, selectedMoments: 0,
+      blockedActions: settings.interactionMode === 'guided' ? GUIDED_BLOCKED_ACTIONS : PASSIVE_BLOCKED_ACTIONS,
       visualMetric: visualMetric(settings),
-      automation: passiveAutomationProvenance(null, settings)
+      automation: settings.interactionMode === 'guided'
+        ? { ...guidedAutomation, actionSchema: AUTO_ACTION_SCHEMA, blockedActions: GUIDED_BLOCKED_ACTIONS }
+        : passiveAutomationProvenance(null, settings)
     } };
   }
   const initial = findStableInitial(samples, settings);
@@ -317,18 +343,23 @@ export async function observeInteractiveAuto(cdp, options) {
     },
     visualMetric: visualMetric(settings),
     warnings: [...warnings],
-    blockedActions: [...PASSIVE_BLOCKED_ACTIONS],
-    automation: passiveAutomationProvenance(sample, settings),
+    blockedActions: [...(settings.interactionMode === 'guided' ? GUIDED_BLOCKED_ACTIONS : PASSIVE_BLOCKED_ACTIONS)],
+    automation: settings.interactionMode === 'guided'
+      ? { ...guidedAutomation, actionSchema: AUTO_ACTION_SCHEMA, blockedActions: GUIDED_BLOCKED_ACTIONS }
+      : passiveAutomationProvenance(sample, settings),
     completionStatus: renderFailure ? 'partial' : 'complete'
   }));
   return { screenshots, autoCapture: {
-    interactionMode: 'passive',
+    interactionMode: settings.interactionMode,
     completionStatus: renderFailure ? 'partial' : 'complete',
     warnings, observedSamples: samples.length,
     selectedMoments: screenshots.length,
     targetCanvas: initial.targetCanvas,
     stabilityCriteria: screenshots[0].stabilityCriteria,
     visualMetric: visualMetric(settings),
-    blockedActions: PASSIVE_BLOCKED_ACTIONS
+    blockedActions: settings.interactionMode === 'guided' ? GUIDED_BLOCKED_ACTIONS : PASSIVE_BLOCKED_ACTIONS,
+    ...(settings.interactionMode === 'guided' ? {
+      automation: { ...guidedAutomation, actionSchema: AUTO_ACTION_SCHEMA, blockedActions: GUIDED_BLOCKED_ACTIONS }
+    } : {})
   } };
 }

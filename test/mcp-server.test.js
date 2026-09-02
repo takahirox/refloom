@@ -218,7 +218,8 @@ test('stdio discovery, progressive reads, additive writes, media, errors, and re
   assert.deepEqual(captureTool.inputSchema.properties.settings.properties.mode.enum, [
     'viewport', 'full-page', 'section', 'hero', 'scroll', 'interactive-auto'
   ]);
-  assert.deepEqual(captureTool.inputSchema.properties.settings.properties.interactionMode.enum, ['passive']);
+  assert.deepEqual(captureTool.inputSchema.properties.settings.properties.interactionMode.enum, ['passive', 'guided']);
+  assert.equal(captureTool.inputSchema.properties.settings.properties.guidedActions.maxItems, 3);
   assert.equal(captureTool.inputSchema.properties.settings.properties.representativeMoments.maximum, 5);
   assert.equal(captureTool.inputSchema.properties.settings.properties.selector.maxLength, 256);
 

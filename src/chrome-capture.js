@@ -255,7 +255,7 @@ export function validateCaptureSettings(options = {}) {
   };
   const autoKeys = [
     'interactionMode', 'observationMs', 'sampleIntervalMs',
-    'representativeMoments', 'stabilitySamples', 'stabilityThreshold'
+    'representativeMoments', 'stabilitySamples', 'stabilityThreshold', 'guidedActions'
   ];
   if (mode !== 'interactive-auto' && autoKeys.some(key => options[key] !== undefined)) {
     throw new Error(CAPTURE_ERROR);
@@ -411,6 +411,7 @@ export async function captureWebsite(input, options = {}) {
         checkpointMs,
         maxScreenshotBytes,
         maxObservationBytes: options.maxObservationBytes ?? 50 * 1024 * 1024,
+        now: options.guidedNow ?? Date.now,
         pause: ms => pause(clock, ms),
         bounded: (promise, timeout) => bounded(promise, clock, timeout)
       });

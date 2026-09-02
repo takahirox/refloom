@@ -195,13 +195,16 @@ test('Library tags have accessible entry, suggestions, chips, and exact filterin
   }
 });
 
-test('Interactive Auto UI is explicitly passive and uses the shared request fields', async () => {
+test('Interactive Auto UI keeps passive default and offers bounded explicit guided gates', async () => {
   const source = await read('src/app.js');
   const editor = source.slice(source.indexOf('function websiteCaptureEditor'), source.indexOf('function referenceEditor'));
   assert.match(editor, /Interactive Auto · Passive WebGL/);
-  assert.match(editor, /interactionMode: 'passive'/);
+  assert.match(editor, /Passive · observe only/);
+  assert.match(editor, /Guided · exact safe buttons/);
+  assert.match(editor, /guidedActions:/);
+  assert.match(editor, /slice\(0, 3\)/);
   assert.match(editor, /representativeMoments: 4/);
-  for (const action of ['clicks', 'types', 'points', 'forms', 'wallets', 'permissions', 'uploads', 'purchases', 'navigates']) {
+  for (const action of ['click', 'forms', 'accounts', 'wallets', 'purchases', 'uploads', 'permissions', 'downloads', 'cross-origin']) {
     assert.match(editor, new RegExp(action));
   }
 });

@@ -4,7 +4,7 @@ export const CAPTURE_SETTING_KEYS = Object.freeze([
   'preset', 'mode', 'selector', 'width', 'height', 'checkpoints',
   'readinessMs', 'settleMs', 'maxRedirects', 'interactionMode',
   'observationMs', 'sampleIntervalMs', 'representativeMoments',
-  'stabilitySamples', 'stabilityThreshold'
+  'stabilitySamples', 'stabilityThreshold', 'guidedActions'
 ]);
 
 export function normalizeCaptureRequest(value) {
