@@ -53,6 +53,8 @@ function appendCheckpoint(workspace, referenceId, screenshot, entityIds, reuseAs
     scroll: screenshot.scroll,
     ...(screenshot.devicePixelRatio === undefined ? {} : { devicePixelRatio: screenshot.devicePixelRatio }),
     ...(screenshot.targetCanvas === undefined ? {} : { targetCanvas: screenshot.targetCanvas }),
+    ...(screenshot.surfaceTargets === undefined ? {} : { surfaceTargets: structuredClone(screenshot.surfaceTargets) }),
+    ...(screenshot.surfaceDiscovery === undefined ? {} : { surfaceDiscovery: structuredClone(screenshot.surfaceDiscovery) }),
     ...(screenshot.relativeTimestampMs === undefined ? {} : { relativeTimestampMs: screenshot.relativeTimestampMs }),
     ...(screenshot.stabilityCriteria === undefined ? {} : { stabilityCriteria: screenshot.stabilityCriteria }),
     ...(screenshot.selectionReason === undefined ? {} : { selectionReason: screenshot.selectionReason }),

@@ -7,6 +7,7 @@ import { PAGE_WEBGL_SURFACE_EXPRESSION } from './webgl-surface-expression.js';
 import {
   normalizeWebGlSurfaces, selectWebGlSurface, webGlSurfaceWarnings
 } from './webgl-surfaces.js';
+import { inspectCdpSurfaceTargets } from './cdp-surface-targets.js';
 
 export const PAGE_WEBGL_RUNTIME_HOOK = EXPANDED_WEBGL_RUNTIME_HOOK;
 export const PAGE_WEBGL_OBSERVATION_EXPRESSION = PAGE_WEBGL_SURFACE_EXPRESSION;
@@ -286,6 +287,14 @@ export async function observeInteractiveAuto(cdp, options) {
   const settings = validateInteractiveAutoSettings(options);
   const samples = [];
   const warnings = [];
+  let surfaceTargets;
+  if (options.inspectSurfaceTargets === true) {
+    surfaceTargets = await inspectCdpSurfaceTargets(cdp, {
+      mainUrl: options.mainUrl,
+      bounded: options.bounded
+    });
+    warnings.push(...surfaceTargets.warnings);
+  }
   let guidedAutomation;
   if (settings.interactionMode === 'guided') {
     guidedAutomation = settings.guidedActions.length
@@ -301,6 +310,7 @@ export async function observeInteractiveAuto(cdp, options) {
   }
   let sawVisibleCanvas = false;
   let sawWebGlContext = false;
+  let discoveredSurfaces = [];
   let renderFailure = false;
   let observationFailure;
   let aggregateBytes = 0;
@@ -311,6 +321,7 @@ export async function observeInteractiveAuto(cdp, options) {
       const observed = surfaceObservation(await options.bounded(
         cdp.evaluate(PAGE_WEBGL_OBSERVATION_EXPRESSION), options.checkpointMs
       ));
+      discoveredSurfaces = observed.surfaces;
       for (const warning of observed.warnings) {
         if (warning !== 'no_supported_surface' && !warnings.includes(warning)) warnings.push(warning);
       }
@@ -366,7 +377,9 @@ export async function observeInteractiveAuto(cdp, options) {
       visualMetric: visualMetric(settings),
       automation: settings.interactionMode === 'guided'
         ? { ...guidedAutomation, actionSchema: AUTO_ACTION_SCHEMA, blockedActions: GUIDED_BLOCKED_ACTIONS }
-        : passiveAutomationProvenance(null, settings)
+        : passiveAutomationProvenance(null, settings),
+      surfaceDiscovery: { surfaces: discoveredSurfaces, warnings: [...warnings] },
+      ...(surfaceTargets ? { surfaceTargets } : {})
     } };
   }
   const initial = findStableInitial(samples, settings);
@@ -390,6 +403,8 @@ export async function observeInteractiveAuto(cdp, options) {
     automation: settings.interactionMode === 'guided'
       ? { ...guidedAutomation, actionSchema: AUTO_ACTION_SCHEMA, blockedActions: GUIDED_BLOCKED_ACTIONS }
       : passiveAutomationProvenance(sample, settings),
+    ...(surfaceTargets ? { surfaceTargets } : {}),
+    surfaceDiscovery: { surfaces: discoveredSurfaces, warnings: [...warnings] },
     completionStatus: renderFailure ? 'partial' : 'complete'
   }));
   return { screenshots, autoCapture: {
@@ -403,6 +418,8 @@ export async function observeInteractiveAuto(cdp, options) {
     blockedActions: settings.interactionMode === 'guided' ? GUIDED_BLOCKED_ACTIONS : PASSIVE_BLOCKED_ACTIONS,
     ...(settings.interactionMode === 'guided' ? {
       automation: { ...guidedAutomation, actionSchema: AUTO_ACTION_SCHEMA, blockedActions: GUIDED_BLOCKED_ACTIONS }
-    } : {})
+    } : {}),
+    ...(surfaceTargets ? { surfaceTargets } : {}),
+    surfaceDiscovery: { surfaces: discoveredSurfaces, warnings: [...warnings] }
   } };
 }

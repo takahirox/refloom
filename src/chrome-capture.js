@@ -128,11 +128,11 @@ export async function connectChromeCdp(_browser, options = {}) {
     pending.clear();
   });
 
-  function send(method, params = {}) {
+  function send(method, params = {}, sessionId) {
     return new Promise((resolve, reject) => {
       const id = nextId++;
       pending.set(id, { resolve, reject });
-      try { socket.send(JSON.stringify({ id, method, params })); }
+      try { socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }
       catch { pending.delete(id); reject(new Error(CAPTURE_ERROR)); }
     });
   }
@@ -412,6 +412,8 @@ export async function captureWebsite(input, options = {}) {
         maxScreenshotBytes,
         maxObservationBytes: options.maxObservationBytes ?? 50 * 1024 * 1024,
         now: options.guidedNow ?? Date.now,
+        inspectSurfaceTargets: true,
+        mainUrl: final.href,
         pause: ms => pause(clock, ms),
         bounded: (promise, timeout) => bounded(promise, clock, timeout)
       });
@@ -439,6 +441,8 @@ export async function captureWebsite(input, options = {}) {
           captureMethod: 'automated-browser',
           captureStrategy: 'passive-webgl-observation',
           targetCanvas: selected.targetCanvas,
+          surfaceTargets: selected.surfaceTargets,
+          surfaceDiscovery: selected.surfaceDiscovery,
           relativeTimestampMs: selected.relativeTimestampMs,
           stabilityCriteria: selected.stabilityCriteria,
           selectionReason: selected.selectionReason,

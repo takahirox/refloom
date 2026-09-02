@@ -138,7 +138,8 @@ test('drives bounded deterministic checkpoints and always cleans up', async () =
   assert.equal(calls.some(([method]) => method === 'Browser.setDownloadBehavior'), true);
   assert.equal(calls.some(([method]) => method === 'Network.setBypassServiceWorker'), true);
   const capabilityIndex = calls.findIndex(([method, value]) => method === 'evaluate' && value.includes("getContext('webgl2')"));
-  const hookIndex = calls.findIndex(([method, value]) => method === 'Page.addScriptToEvaluateOnNewDocument' && value.source.includes('HTMLCanvasElement.prototype.getContext'));
+  const hookIndex = calls.findIndex(([method, value]) => method === 'Page.addScriptToEvaluateOnNewDocument' &&
+    value.source.includes('canvasPrototype.getContext') && value.source.includes('transferControlToOffscreen'));
   const navigationIndex = calls.findIndex(([method]) => method === 'Page.navigate');
   assert.notEqual(capabilityIndex, -1);
   assert.notEqual(hookIndex, -1);
