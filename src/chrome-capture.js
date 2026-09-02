@@ -228,7 +228,9 @@ export function validateCaptureSettings(options = {}) {
   const hasHeight = options.height !== undefined;
   if (suppliedPreset !== undefined &&
       suppliedPreset !== 'custom' && !Object.hasOwn(CAPTURE_PRESETS, suppliedPreset)) throw new Error(CAPTURE_ERROR);
-  if ((suppliedPreset && suppliedPreset !== 'custom' && (hasWidth || hasHeight)) ||
+  if ((suppliedPreset && suppliedPreset !== 'custom' &&
+       ((hasWidth && options.width !== CAPTURE_PRESETS[suppliedPreset].width) ||
+        (hasHeight && options.height !== CAPTURE_PRESETS[suppliedPreset].height))) ||
       (suppliedPreset === 'custom' && !hasWidth && !hasHeight)) throw new Error(CAPTURE_ERROR);
   const preset = suppliedPreset || (hasWidth || hasHeight ? 'custom' : 'desktop');
   const dimensions = CAPTURE_PRESETS[preset] || {

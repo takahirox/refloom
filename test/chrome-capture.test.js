@@ -63,7 +63,13 @@ test('centrally validates bounded presets and explicit capture modes', () => {
     preset: 'custom',
     mode: 'scroll'
   });
-  assert.throws(() => validateCaptureSettings({ preset: 'desktop', width: 800, height: 600 }));
+  for (const [preset, dimensions] of Object.entries(CAPTURE_PRESETS)) {
+    const canonical = validateCaptureSettings({ preset, mode: 'viewport' });
+    assert.deepEqual(validateCaptureSettings(canonical), canonical);
+    assert.equal(validateCaptureSettings({ preset, ...dimensions }).preset, preset);
+    assert.throws(() => validateCaptureSettings({ preset, width: dimensions.width + 1 }));
+    assert.throws(() => validateCaptureSettings({ preset, height: dimensions.height + 1 }));
+  }
   assert.throws(() => validateCaptureSettings({ mode: 'viewport', selector: 'main' }));
 });
 

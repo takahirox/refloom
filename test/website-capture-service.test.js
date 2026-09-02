@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
+import { normalizeCaptureRequest } from '../src/capture-request.js';
 import { createProject, createReference, createWorkspace, updateProject } from '../src/domain.js';
 import { RevisionConflictError } from '../src/persistence-errors.js';
 import { encodeBackup, referencedBlobIds } from '../src/storage.js';
@@ -80,6 +81,26 @@ function dependencies(driver, values = ['media-1', 'asset-1', 'target-1', 'momen
   let index = 0;
   return { resolver, captureWebsite: driver, randomUUID: () => values[index++] };
 }
+
+test('named preset survives request normalization and service validation', async () => {
+  const store = await fixture();
+  let received;
+  const request = normalizeCaptureRequest({ referenceId: 'reference-1', settings: { preset: 'desktop', mode: 'viewport' } });
+  const result = await captureReference(
+    store,
+    request.referenceId,
+    request.settings,
+    dependencies(async (_url, options) => {
+      received = options;
+      return {};
+    }, [])
+  );
+  assert.equal(result.status, 'complete');
+  assert.deepEqual(
+    { preset: received.preset, width: received.width, height: received.height, mode: received.mode },
+    { preset: 'desktop', width: 1440, height: 900, mode: 'viewport' }
+  );
+});
 
 test('persists complete capture provenance, relationships, and backup bytes', async () => {
   const store = await fixture();
