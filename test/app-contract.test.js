@@ -6,6 +6,7 @@ test('URL capture controls are visibly default-on with shared and per-create opt
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   assert.match(html, /id="capture-website"[^>]*checked/);
   assert.match(html, /Automatically capture after saving/);
+  assert.match(html, /one desktop viewport/);
   assert.match(html, /id="automatic-website-capture"[^>]*checked/);
   assert.match(html, /shared Workspace preference/);
 });
@@ -18,7 +19,7 @@ test('UI saves before capture and does not auto-capture URL edits or non-URL imp
   assert.ok(submit >= 0 && save > submit && capture > save);
   const editor = source.slice(source.indexOf('function referenceEditor'), source.indexOf('function selectionEditor'));
   assert.doesNotMatch(editor, /captureWebsite/);
-  const files = source.slice(source.indexOf('async function captureFiles'), source.indexOf('function referenceEditor'));
+  const files = source.slice(source.indexOf('async function captureFiles'), source.indexOf('function websiteCaptureEditor'));
   assert.doesNotMatch(files, /captureWebsite/);
 });
 
@@ -51,9 +52,10 @@ test('UI refresh preserves hash routes, navigation links, and section landmarks'
 });
 
 test('UI refresh preserves form names, file inputs, and dialog forms', async () => {
-  const html = await read('public/index.html');
+  const [html, source] = await Promise.all([read('public/index.html'), read('src/app.js')]);
   const form = html.slice(html.indexOf('<form id="url-form"'), html.indexOf('</form>'));
-  for (const name of ['url', 'captureWebsite', 'width', 'height', 'checkpoints', 'readinessMs', 'settleMs']) assert.match(form, new RegExp(`name="${name}"`), `missing field ${name}`);
+  for (const name of ['url', 'captureWebsite']) assert.match(form, new RegExp(`name="${name}"`), `missing field ${name}`);
+  for (const value of ['desktop', 'tablet', 'mobile', 'viewport', 'full-page', 'section', 'hero']) assert.match(source, new RegExp(`value: '${value}'`));
   assert.match(html, /<form id="editor-form" method="dialog">/);
   assert.match(html, /<dialog id="confirm-dialog" aria-labelledby="confirm-title"><form method="dialog">/);
   assert.match(html, /id="file-input" class="sr-only" type="file" accept="image\/\*,video\/\*" multiple/);
@@ -64,7 +66,7 @@ test('UI refresh preserves accessibility labelling and keyboard focus order', as
   const html = await read('public/index.html');
   for (const attribute of [
     'aria-expanded="false" aria-controls="primary-nav"', 'aria-label="Primary"', 'aria-describedby="project-help"',
-    'id="project-help" class="sr-only"', 'role="alert"', 'aria-controls="capture-settings"', 'tabindex="0" role="button" aria-describedby="drop-help"',
+    'id="project-help" class="sr-only"', 'role="alert"', 'tabindex="0" role="button" aria-describedby="drop-help"',
     'id="reference-list" class="card-grid" aria-live="polite"', 'role="status" aria-live="polite" aria-atomic="true"', 'aria-label="Close"',
     'aria-labelledby="dialog-title"', 'aria-labelledby="welcome-title"'
   ]) assert.ok(html.includes(attribute), `missing ${attribute}`);

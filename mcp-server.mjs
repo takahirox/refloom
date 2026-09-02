@@ -49,10 +49,13 @@ const tools = [
   { name: 'add_selection_to_board', description: 'Append an existing selection to an existing board.', inputSchema: required(objectSchema({ boardId: string('Board ID', 128), selectionId: string('Selection ID', 128), expectedRevision: { type: 'integer', minimum: 0 } }), 'boardId', 'selectionId') },
   {
     name: 'request_website_capture',
-    description: 'Capture bounded screenshots from the authoritative sourceUrl of an existing reference.',
+    description: 'Capture a responsive viewport, full page, or useful first section from the authoritative sourceUrl of an existing reference.',
     inputSchema: required(objectSchema({
       referenceId: string('Reference ID', 128),
       settings: objectSchema({
+        preset: { type: 'string', enum: ['desktop', 'tablet', 'mobile'] },
+        mode: { type: 'string', enum: ['viewport', 'full-page', 'section', 'hero', 'scroll'] },
+        selector: string('Optional CSS selector for section capture', 256),
         width: { type: 'integer', minimum: 320, maximum: 2560 },
         height: { type: 'integer', minimum: 320, maximum: 1440 },
         checkpoints: { type: 'integer', minimum: 1, maximum: 5 },

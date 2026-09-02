@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import {
-  captureDiagnosticCode, captureWebsite, connectChromeCdp, findChrome, verifyChromeRuntime
+  CAPTURE_PRESETS, captureDiagnosticCode, captureWebsite, connectChromeCdp, findChrome, validateCaptureSettings, verifyChromeRuntime
 } from '../src/chrome-capture.js';
 
 test('reports a stable browser-unavailable diagnostic without exposing candidate paths', async () => {
@@ -38,6 +38,33 @@ test('connects to only the profile-published loopback CDP page endpoint', async 
   assert.equal(await cdp.evaluate('1 + 1'), 'ready');
   assert.equal(commands[0].method, 'Runtime.evaluate');
   await cdp.close();
+});
+
+test('centrally validates bounded presets and explicit capture modes', () => {
+  assert.deepEqual(validateCaptureSettings({ preset: 'mobile', mode: 'hero' }), {
+    settleMs: 500,
+    readinessMs: 1_000,
+    checkpoints: 1,
+    width: 390,
+    height: 844,
+    maxRedirects: 10,
+    preset: 'mobile',
+    mode: 'hero'
+  });
+  assert.deepEqual(CAPTURE_PRESETS.tablet, { width: 1024, height: 768 });
+  assert.throws(() => validateCaptureSettings({ preset: 'watch' }));
+  assert.deepEqual(validateCaptureSettings({ width: 800 }), {
+    settleMs: 500,
+    readinessMs: 1_000,
+    checkpoints: 3,
+    width: 800,
+    height: 900,
+    maxRedirects: 10,
+    preset: 'custom',
+    mode: 'scroll'
+  });
+  assert.throws(() => validateCaptureSettings({ preset: 'desktop', width: 800, height: 600 }));
+  assert.throws(() => validateCaptureSettings({ mode: 'viewport', selector: 'main' }));
 });
 
 test('drives bounded deterministic checkpoints and always cleans up', async () => {
@@ -96,6 +123,11 @@ test('drives bounded deterministic checkpoints and always cleans up', async () =
   assert.equal(callbacks[0].domain, 'example.com');
   assert.equal(callbacks[0].capturedAt, '2026-08-30T00:00:00.000Z');
   assert.equal(callbacks[0].captureMethod, 'automated-browser');
+  assert.equal(callbacks[0].sourceUrl, 'https://example.com/');
+  assert.equal(callbacks[0].preset, 'desktop');
+  assert.equal(callbacks[0].mode, 'scroll');
+  assert.deepEqual(callbacks[0].region, { x: 0, y: 0, width: 1440, height: 900 });
+  assert.deepEqual(callbacks[0].scroll, { x: 0, y: 0 });
   assert.equal(callbacks[0].captureStrategy, 'deterministic-scroll');
   assert.equal(calls.some(([method]) => method === 'Browser.setDownloadBehavior'), true);
   assert.equal(calls.some(([method]) => method === 'Network.setBypassServiceWorker'), true);

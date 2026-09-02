@@ -30,35 +30,49 @@ function ids(randomUUID) {
   };
 }
 
-function appendCheckpoint(workspace, referenceId, screenshot, entityIds) {
+function appendCheckpoint(workspace, referenceId, screenshot, entityIds, reuseAsset = false) {
   const provenance = {
+    sourceUrl: screenshot.sourceUrl || screenshot.originalUrl,
     originalUrl: screenshot.originalUrl,
     finalUrl: screenshot.finalUrl,
     pageTitle: screenshot.title,
     domain: screenshot.domain,
     capturedAt: screenshot.capturedAt,
     viewport: screenshot.viewport,
+    preset: screenshot.preset,
+    mode: screenshot.mode,
     captureMethod: screenshot.captureMethod,
     captureStrategy: screenshot.captureStrategy,
     checkpointIndex: screenshot.checkpoint.index,
     checkpointY: screenshot.checkpoint.y,
-    checkpointCount: screenshot.checkpoint.count
+    checkpointCount: screenshot.checkpoint.count,
+    region: screenshot.region,
+    scroll: screenshot.scroll
   };
-  let next = createAsset(workspace, {
-    id: entityIds.assetId,
-    referenceId,
-    kind: 'image',
-    locator: `blob:${entityIds.mediaId}`,
-    mediaType: 'image/png',
-    capturedAt: screenshot.capturedAt,
-    provenance
-  });
+  let next = workspace;
+  if (!reuseAsset) {
+    next = createAsset(next, {
+      id: entityIds.assetId,
+      referenceId,
+      kind: 'image',
+      locator: `blob:${entityIds.mediaId}`,
+      mediaType: 'image/png',
+      capturedAt: screenshot.capturedAt,
+      provenance
+    });
+  }
   next = createTarget(next, {
     id: entityIds.targetId,
     referenceId,
     assetId: entityIds.assetId,
     kind: 'frame',
-    detail: { checkpointIndex: screenshot.checkpoint.index, y: screenshot.checkpoint.y }
+    detail: {
+      checkpointIndex: screenshot.checkpoint.index,
+      y: screenshot.checkpoint.y,
+      mode: screenshot.mode,
+      region: screenshot.region,
+      scroll: screenshot.scroll
+    }
   });
   return createMoment(next, {
     id: entityIds.momentId,
@@ -73,6 +87,7 @@ export async function captureReference(store, referenceId, settings = {}, depend
   if (activeReferences.has(referenceId)) return failed(ERROR.BUSY);
   activeReferences.add(referenceId);
   const captured = [];
+  const assetsByPng = new Map();
   try {
     const initial = await store.load();
     const reference = initial.workspace.references.find(item => item.id === referenceId);
@@ -92,18 +107,26 @@ export async function captureReference(store, referenceId, settings = {}, depend
       ...(dependencies.captureOptions || {}),
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
       onScreenshot: async screenshot => {
-        const entityIds = ids(randomUUID);
+        const generatedIds = ids(randomUUID);
+        const reused = assetsByPng.get(screenshot.png);
+        const entityIds = reused ? {
+          ...generatedIds,
+          mediaId: reused.mediaId,
+          assetId: reused.assetId
+        } : generatedIds;
         for (let attempt = 0; ; attempt += 1) {
           const current = await store.load();
           if (!current.workspace.references.some(item => item.id === referenceId)) throw new Error(ERROR.FAILED);
-          const next = appendCheckpoint(current.workspace, referenceId, screenshot, entityIds);
+          const next = appendCheckpoint(current.workspace, referenceId, screenshot, entityIds, Boolean(reused));
           try {
-            await store.commit(current.revision, next, [{
+            const additions = reused ? [] : [{
               id: entityIds.mediaId,
               data: screenshot.png,
               type: 'image/png',
               name: `${entityIds.mediaId}.png`
-            }]);
+            }];
+            await store.commit(current.revision, next, additions);
+            if (!reused) assetsByPng.set(screenshot.png, entityIds);
             captured.push(entityIds);
             return;
           } catch (error) {

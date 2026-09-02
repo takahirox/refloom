@@ -51,6 +51,9 @@ shared Workspace preference changes the visible default, while a one-off choice
 still wins. Refloom commits the URL Reference before it asks the scheduler to
 open the page, so `queued`, `capturing`, `complete`, `partial`, `failed`,
 `cancelled`, and explicitly skipped outcomes never roll back the saved URL.
+The initial job intentionally stores one desktop viewport. Responsive presets
+and richer modes remain an explicit action on the saved Reference, keeping URL
+capture immediate and avoiding an unexpected burst of images.
 
 MCP `create_reference` follows the same rule when `sourceUrl` is present. Pass
 `capture: false` to opt out, poll `get_capture_status`, and use
@@ -107,11 +110,17 @@ change cannot replace the address selected for an existing outbound connection.
 ## Capture result and bounds
 
 The driver records the final page URL, title, document and viewport dimensions,
-capture time, and representative PNG images. Images include the initial viewport
-and a bounded number of evenly spaced deterministic vertical checkpoints after a
-bounded settle delay. Navigation readiness, each checkpoint, settling, and the
-whole operation have finite deadlines; viewport, page-height metadata, bytes,
-and connections are capped.
+capture time, and representative PNG images. Desktop (`1440×900`), tablet
+(`1024×768`), and mobile (`390×844`) presets use the same contract in the UI and
+MCP. `viewport` stores the initial viewport, `full-page` uses a bounded CDP clip,
+and `section` chooses the first useful hero/main/header region and records its
+exact coordinates and selector. The legacy custom-width `scroll` mode remains
+available for compatibility with existing integrations.
+
+Navigation readiness, settling, the whole operation, screenshot bytes, and
+connections have finite limits. A clip above 40 million CSS pixels or an image
+above 25 MiB fails with a private `CAPTURE_LIMIT_EXCEEDED` diagnostic; public
+HTTP/MCP responses continue to expose only `CAPTURE_FAILED`.
 
 ## Progressive persistence
 
@@ -120,7 +129,10 @@ Reference before launching the driver. Each completed screenshot is passed
 through an awaited callback and
 committed immediately as a blob-backed image Asset, an asset Target, and a
 Moment. Every record retains original/final URL, title/domain, capture time,
-viewport, capture method, strategy, and exact checkpoint position. A later
+viewport, responsive preset, mode, exact captured region, capture method,
+strategy, checkpoint position, and screenshot SHA-256. Before adding media, the
+service compares that digest with the Reference's existing captured Assets;
+identical bytes are reused rather than producing duplicate Assets. A later
 navigation, renderer, media-limit, or revision failure therefore leaves the
 Reference and all previously committed states intact.
 
@@ -143,8 +155,8 @@ The UI visibly defaults initial capture on when a website URL is saved; the
 user can opt out before saving or disable the shared Workspace default. Later
 fetches still require an explicit Capture action. The HTTP and MCP capture
 surfaces accept only an existing Reference ID and the bounded
-viewport/checkpoint/readiness settings; they cannot supply a URL, executable,
-proxy, filesystem path, or dependency override. The Reference source URL is
+preset/mode/viewport/checkpoint/readiness settings; they cannot supply a URL,
+executable, proxy, filesystem path, or dependency override. The Reference source URL is
 always reloaded as authoritative input.
 
 Video, animation recording, scripted interaction, semantic state detection,

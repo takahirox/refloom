@@ -65,6 +65,11 @@ function screenshot(index = 0, count = 1) {
     viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
     checkpoint: { index, y: index * 720, count },
     capturedAt: '2026-08-30T00:00:00.000Z',
+    sourceUrl: 'https://example.com/page',
+    preset: 'custom',
+    mode: 'scroll',
+    region: { x: 0, y: index * 720, width: 1280, height: 720 },
+    scroll: { x: 0, y: index * 720 },
     captureMethod: 'automated-browser',
     captureStrategy: 'deterministic-scroll'
   };
@@ -94,17 +99,44 @@ test('persists complete capture provenance, relationships, and backup bytes', as
   assert.equal(target.referenceId, 'reference-1');
   assert.equal(moment.targetId, target.id);
   assert.deepEqual(asset.provenance, {
+    sourceUrl: 'https://example.com/page',
     originalUrl: 'https://example.com/page', finalUrl: 'https://www.example.com/final',
     pageTitle: 'Example page', domain: 'www.example.com', capturedAt: '2026-08-30T00:00:00.000Z',
     viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
+    preset: 'custom', mode: 'scroll',
     captureMethod: 'automated-browser', captureStrategy: 'deterministic-scroll',
-    checkpointIndex: 0, checkpointY: 0, checkpointCount: 1
+    checkpointIndex: 0, checkpointY: 0, checkpointCount: 1,
+    region: { x: 0, y: 0, width: 1280, height: 720 }, scroll: { x: 0, y: 0 }
   });
   assert.deepEqual(moment.state, asset.provenance);
   const backup = JSON.parse(await store.exportBackup());
   assert.equal(backup.binaries[0].data, Buffer.from('png-0').toString('base64'));
   assert.equal(backup.binaries[0].type, 'image/png');
   assert.equal(backup.binaries[0].name, 'capture_media-1.png');
+});
+
+test('reuses an identical screenshot Asset while retaining distinct Target and Moment provenance', async () => {
+  const store = await fixture();
+  const first = screenshot(0, 2);
+  const second = { ...screenshot(1, 2), png: first.png };
+  const driver = async (_url, options) => {
+    await options.onScreenshot(first);
+    await options.onScreenshot(second);
+    return {};
+  };
+  const values = [
+    'media-1', 'asset-1', 'target-1', 'moment-1',
+    'media-2', 'asset-2', 'target-2', 'moment-2'
+  ];
+  const result = await captureReference(store, 'reference-1', {}, dependencies(driver, values));
+  assert.equal(result.status, 'complete');
+  const { workspace } = await store.load();
+  assert.equal(workspace.assets.length, 1);
+  assert.equal(workspace.targets.length, 2);
+  assert.equal(workspace.moments.length, 2);
+  assert.equal(workspace.targets[0].assetId, workspace.targets[1].assetId);
+  assert.notDeepEqual(workspace.moments[0].state.scroll, workspace.moments[1].state.scroll);
+  assert.equal(store.media.size, 1);
 });
 
 test('failure before the first callback leaves the reference unchanged', async () => {

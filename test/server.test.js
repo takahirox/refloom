@@ -291,7 +291,8 @@ test('capture API passes only a bounded reference request to the injected servic
   assert.equal(response.status, 201);
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], captureRepository);
-  assert.deepEqual(calls[0][2], { width: 800, height: 600, checkpoints: 2, readinessMs: 1000, settleMs: 500, maxRedirects: 10 });
+  assert.deepEqual(calls[0][2], { width: 800, height: 600, checkpoints: 2,
+    readinessMs: 1000, settleMs: 500, maxRedirects: 10, preset: 'custom', mode: 'scroll' });
   assert.deepEqual(await response.json(), { status: 'complete', captured: [{ assetId: 'asset-1', targetId: 'target-1', momentId: 'moment-1' }] });
   const status = await fetch(`${captureOrigin}/api/captures/reference-1/status`);
   assert.deepEqual(await status.json(), {

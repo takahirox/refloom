@@ -214,6 +214,9 @@ test('stdio discovery, progressive reads, additive writes, media, errors, and re
   assert.equal(captureTool.annotations.destructiveHint, false);
   assert.equal(captureTool.annotations.openWorldHint, true);
   assert.deepEqual(Object.keys(captureTool.inputSchema.properties), ['referenceId', 'settings']);
+  assert.deepEqual(captureTool.inputSchema.properties.settings.properties.preset.enum, ['desktop', 'tablet', 'mobile']);
+  assert.deepEqual(captureTool.inputSchema.properties.settings.properties.mode.enum, ['viewport', 'full-page', 'section', 'hero', 'scroll']);
+  assert.equal(captureTool.inputSchema.properties.settings.properties.selector.maxLength, 256);
 
   const projects = await mcp.request('tools/call', { name: 'list_projects', arguments: {} });
   assert.deepEqual(projects.result.structuredContent.projects.map(item => item.id), ['project_one']);

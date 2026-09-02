@@ -166,7 +166,6 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function applyCaptureDefault() {
   const enabled = workspace.settings.automaticWebsiteCapture;
   $('#capture-website').checked = enabled;
-  $('#capture-settings').hidden = !enabled;
   $('#automatic-website-capture').checked = enabled;
 }
 
@@ -314,6 +313,28 @@ async function captureFiles(files, referenceId) {
   await commit(next, additions, `${accepted.length} file${accepted.length === 1 ? '' : 's'} captured`);
 }
 
+function websiteCaptureEditor(reference, control) {
+  const preset = element('select', { id: 'field-capture-preset', name: 'preset' }, [
+    element('option', { value: 'desktop', text: 'Desktop · 1440 × 900' }),
+    element('option', { value: 'tablet', text: 'Tablet · 1024 × 768' }),
+    element('option', { value: 'mobile', text: 'Mobile · 390 × 844' })
+  ]);
+  const mode = element('select', { id: 'field-capture-mode', name: 'mode' }, [
+    element('option', { value: 'viewport', text: 'Initial viewport' }),
+    element('option', { value: 'full-page', text: 'Full page' }),
+    element('option', { value: 'section', text: 'First main section' }),
+    element('option', { value: 'hero', text: 'Hero' })
+  ]);
+  openEditor('Capture website', [
+    element('div', { className: 'field' }, [element('label', { for: 'field-capture-preset', text: 'Responsive preset' }), preset]),
+    element('div', { className: 'field' }, [element('label', { for: 'field-capture-mode', text: 'Capture mode' }), mode]),
+    element('p', { className: 'hint', text: 'Capture stores still images only and does not click, type, hover, or record video.' })
+  ], data => captureWebsite(reference.id, {
+    preset: data.get('preset'), mode: data.get('mode'), readinessMs: 1000,
+    settleMs: 500, maxRedirects: 10
+  }, control));
+}
+
 function referenceEditor(reference) {
   const tags = tagEditor(reference.tags, reference.id);
   tags.setSuggestions(listReferenceTagSuggestions(projectItems('references')).map(({ tag }) => tag));
@@ -415,9 +436,7 @@ async function renderLibrary() {
     add.addEventListener('click', () => { $('#file-input').dataset.referenceId = reference.id; $('#file-input').click(); });
     const websiteUrl = safeExternalWebsiteUrl(reference.sourceUrl);
     const websiteCapture = reference.sourceUrl ? element('button', { type: 'button', text: assets.some(asset => asset.provenance?.captureStrategy) ? 'Recapture website' : 'Capture website' }) : null;
-    websiteCapture?.addEventListener('click', () => captureWebsite(reference.id, {
-      width: 1440, height: 900, checkpoints: 3, readinessMs: 1000, settleMs: 500, maxRedirects: 10
-    }, websiteCapture));
+    websiteCapture?.addEventListener('click', () => websiteCaptureEditor(reference, websiteCapture));
     const captureState = captureStates.get(reference.id);
     if (websiteCapture && captureState && ['queued', 'capturing'].includes(captureState.status)) {
       websiteCapture.disabled = true;
@@ -579,14 +598,10 @@ function bindEvents() {
     next = createAsset(next, { referenceId: reference.id, kind: 'url', locator: url, provenance: { captureMethod: 'manual-url' } });
     next = signal(next, 'capture', { type: 'reference', id: reference.id }, { method: 'url' });
     const optedIn = data.get('captureWebsite') === 'on';
-    const settings = Object.fromEntries(['width', 'height', 'checkpoints', 'readinessMs', 'settleMs'].map(key => [key, Number(data.get(key))]));
     const submit = form.querySelector('[type="submit"]');
     submit.disabled = true;
     try {
-      const result = await commit(next, [], 'URL saved', {
-        capture: optedIn,
-        ...(optedIn ? { captureSettings: { ...settings, maxRedirects: 10 } } : {})
-      });
+      const result = await commit(next, [], 'URL saved', { capture: optedIn });
       form.reset();
       urlTagEditor.clear();
       applyCaptureDefault();
@@ -597,7 +612,6 @@ function bindEvents() {
     } catch (error) { submit.disabled = false; announce(error.message, true); return; }
     if (!optedIn) submit.disabled = false;
   });
-  $('#capture-website').addEventListener('change', event => { $('#capture-settings').hidden = !event.currentTarget.checked; });
   $('#automatic-website-capture').addEventListener('change', async event => {
     const enabled = event.currentTarget.checked;
     try {

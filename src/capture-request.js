@@ -1,7 +1,8 @@
 import { validateCaptureSettings } from './chrome-capture.js';
 
 export const CAPTURE_SETTING_KEYS = Object.freeze([
-  'width', 'height', 'checkpoints', 'readinessMs', 'settleMs', 'maxRedirects'
+  'preset', 'mode', 'selector', 'width', 'height', 'checkpoints',
+  'readinessMs', 'settleMs', 'maxRedirects'
 ]);
 
 export function normalizeCaptureRequest(value) {

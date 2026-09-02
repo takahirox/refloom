@@ -52,17 +52,9 @@
           <label for="capture-url">Source URL</label>
           <div class="inline"><input id="capture-url" name="url" type="url" required placeholder="https://example.com"><button class="primary" type="submit">Save</button></div>
           <div id="url-tags"></div>
-          <p class="hint">The URL is saved first. Initial website capture is on by default and can be disabled below.</p>
-          <label class="check-option"><input id="capture-website" name="captureWebsite" type="checkbox" aria-controls="capture-settings" checked> Automatically capture after saving</label>
-          <fieldset id="capture-settings" class="capture-settings">
-            <legend>Website capture settings</legend>
-            <label>Viewport width <input name="width" type="number" min="320" max="2560" value="1440" required></label>
-            <label>Viewport height <input name="height" type="number" min="320" max="1440" value="900" required></label>
-            <label>Checkpoints <input name="checkpoints" type="number" min="1" max="5" value="3" required></label>
-            <label>Page readiness (ms) <input name="readinessMs" type="number" min="0" max="15000" value="1000" required></label>
-            <label>Checkpoint settle (ms) <input name="settleMs" type="number" min="0" max="2000" value="500" required></label>
-            <p class="hint">Capture makes a bounded request to the saved URL and stores still screenshots only. It does not record video or interact with the page.</p>
-          </fieldset>
+          <p class="hint">The URL is saved first. Optional initial capture stores one desktop viewport and never delays or rolls back the save.</p>
+          <label class="check-option"><input id="capture-website" name="captureWebsite" type="checkbox" checked> Automatically capture after saving</label>
+          <p class="hint">Use Capture website on the saved Reference for responsive, full-page, or section capture.</p>
         </form>
         <div id="drop-zone" class="panel drop-zone" tabindex="0" role="button" aria-describedby="drop-help">
           <h2>Add image or video</h2>

@@ -115,6 +115,10 @@ state.
 The `request_website_capture` tool is an explicitly open-world, non-destructive
 action: it accepts an existing Reference ID and bounded capture settings, then
 uses only that Reference's stored source URL.
+Choose a `desktop`, `tablet`, or `mobile` preset and a `viewport`, `full-page`,
+or automatic `section` mode. Custom width/height with the legacy bounded
+`scroll` mode remains supported for existing clients; preset dimensions cannot
+be mixed with custom dimensions.
 Creating a Reference with a website `sourceUrl` is also open-world: one initial
 capture is queued by default after the Reference commit succeeds. Pass
 `capture: false` to `create_reference` to opt out for that creation. Use
@@ -141,10 +145,11 @@ rendering constraints.
 1. Create a project and optional brief.
 2. Capture an image by picker, drop, or clipboard, or save a URL immediately;
    optional URL tags become chips when entered with comma or Enter.
-3. A newly saved website URL queues bounded initial/scroll screenshots by
-   default. Disable the visible per-create control or shared Workspace default
+3. A newly saved website URL queues one desktop viewport by default. Disable
+   the visible per-create control or shared Workspace default
    to save without external access. The URL remains saved if capture is
    cancelled, Chrome is unavailable, or a later checkpoint fails.
+   Later capture can explicitly select desktop, tablet, mobile, full-page, or section output.
 4. Enrich the reference later with provenance, notes, tags, and more image or
    video assets. Tag suggestions combine tags already used by References with
    the built-in starter list.
@@ -186,7 +191,7 @@ method needed to reproduce them.
 
 Included: project/reference capture and enrichment, canonical Reference tags,
 Library text and exact-tag filtering, controlled automatic website screenshot
-checkpoints, precise selections, boards, factual activity signals, Markdown/JSON
+presets and modes, precise selections, boards, factual activity signals, Markdown/JSON
 direction export, validated backup/import, cascade deletion, and local reset.
 
 Not included: video/hover/click/drag capture, semantic transition detection,

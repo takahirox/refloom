@@ -232,16 +232,44 @@ export async function verifyChromeRuntime(options = {}) {
   }
 }
 
+export const CAPTURE_PRESETS = Object.freeze({
+  desktop: Object.freeze({ width: 1440, height: 900 }),
+  tablet: Object.freeze({ width: 1024, height: 768 }),
+  mobile: Object.freeze({ width: 390, height: 844 })
+});
+export const CAPTURE_MODES = Object.freeze(['scroll', 'viewport', 'full-page', 'section', 'hero']);
+
 export function validateCaptureSettings(options = {}) {
+  const suppliedPreset = options.preset;
+  const hasWidth = options.width !== undefined;
+  const hasHeight = options.height !== undefined;
+  if (suppliedPreset !== undefined &&
+      suppliedPreset !== 'custom' && !Object.hasOwn(CAPTURE_PRESETS, suppliedPreset)) throw new Error(CAPTURE_ERROR);
+  if ((suppliedPreset && suppliedPreset !== 'custom' && (hasWidth || hasHeight)) ||
+      (suppliedPreset === 'custom' && !hasWidth && !hasHeight)) throw new Error(CAPTURE_ERROR);
+  const preset = suppliedPreset || (hasWidth || hasHeight ? 'custom' : 'desktop');
+  const dimensions = CAPTURE_PRESETS[preset] || {
+    width: options.width ?? CAPTURE_PRESETS.desktop.width,
+    height: options.height ?? CAPTURE_PRESETS.desktop.height
+  };
+  const mode = options.mode ?? 'scroll';
+  const selector = options.selector;
+  if (!CAPTURE_MODES.includes(mode) ||
+      (selector !== undefined && (mode !== 'section' || typeof selector !== 'string' ||
+        !selector.trim() || selector.length > 256))) throw new Error(CAPTURE_ERROR);
   const values = {
     settleMs: options.settleMs ?? 500,
     readinessMs: options.readinessMs ?? 1_000,
-    checkpoints: options.checkpoints ?? 3,
-    width: options.width ?? 1440,
-    height: options.height ?? 900,
-    maxRedirects: options.maxRedirects ?? 10
+    checkpoints: mode === 'scroll' ? options.checkpoints ?? 3 : 1,
+    width: dimensions.width,
+    height: dimensions.height,
+    maxRedirects: options.maxRedirects ?? 10,
+    preset,
+    mode,
+    ...(selector === undefined ? {} : { selector: selector.trim() })
   };
-  if (!Object.values(values).every(Number.isSafeInteger) ||
+  const numeric = ['settleMs', 'readinessMs', 'checkpoints', 'width', 'height', 'maxRedirects'];
+  if (!numeric.every(key => Number.isSafeInteger(values[key])) ||
       values.settleMs < 0 || values.settleMs > 2_000 ||
       values.readinessMs < 0 || values.readinessMs > 15_000 ||
       values.checkpoints < 1 || values.checkpoints > 5 ||
@@ -260,7 +288,8 @@ export async function captureWebsite(input, options = {}) {
   const connectCdp = options.connectCdp || connectChromeCdp;
   const overallMs = options.overallTimeoutMs ?? 45_000;
   const checkpointMs = options.checkpointTimeoutMs ?? 8_000;
-  const { settleMs, readinessMs, checkpoints, width, height, maxRedirects } = validateCaptureSettings(options);
+  const settings = validateCaptureSettings(options);
+  const { settleMs, readinessMs, checkpoints, width, height, maxRedirects, preset, mode, selector } = settings;
   const maxScreenshotBytes = options.maxScreenshotBytes ?? 25 * 1024 * 1024;
   let profile;
   let proxy;
@@ -328,7 +357,7 @@ export async function captureWebsite(input, options = {}) {
     await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
     await cdp.send('Network.setBypassServiceWorker', { bypass: true });
     await cdp.send('Emulation.setDeviceMetricsOverride', {
-      width, height, deviceScaleFactor: 1, mobile: false
+      width, height, deviceScaleFactor: 1, mobile: preset === 'mobile'
     });
     const closePopup = event => {
       if (event.targetInfo?.type === 'page' && event.targetInfo?.targetId !== cdp.targetId) {
@@ -374,33 +403,80 @@ export async function captureWebsite(input, options = {}) {
       viewportHeight: innerHeight
     })`);
     if (!metrics || typeof metrics.url !== 'string' || typeof metrics.title !== 'string' ||
-        ![metrics.width, metrics.height, metrics.viewportWidth, metrics.viewportHeight].every(Number.isFinite)) throw new Error(CAPTURE_ERROR);
+        ![metrics.width, metrics.height, metrics.viewportWidth, metrics.viewportHeight].every(value => Number.isFinite(value) && value > 0)) throw new Error(CAPTURE_ERROR);
     const final = await normalizeCaptureUrl(metrics.url, { resolver: options.resolver });
     const capturedAt = options.now?.() || new Date().toISOString();
+    const strategy = {
+      scroll: 'deterministic-scroll', viewport: 'viewport', 'full-page': 'full-page',
+      section: 'deterministic-section', hero: 'deterministic-hero'
+    }[mode];
+    let plans;
+    if (mode === 'scroll') {
+      plans = Array.from({ length: checkpoints }, (_, index) => {
+        const y = Math.round(Math.max(0, metrics.height - metrics.viewportHeight) * index / Math.max(1, checkpoints - 1));
+        return {
+          scrollY: y,
+          region: {
+            x: 0, y, width: Math.min(width, metrics.width),
+            height: Math.min(height, Math.max(1, metrics.height - y))
+          }
+        };
+      });
+    } else if (mode === 'viewport') {
+      plans = [{ scrollY: 0, region: { x: 0, y: 0, width: Math.min(width, metrics.width), height: Math.min(height, metrics.height) } }];
+    } else if (mode === 'full-page') {
+      plans = [{ scrollY: 0, region: { x: 0, y: 0, width: metrics.width, height: metrics.height }, clip: { x: 0, y: 0, width: metrics.width, height: metrics.height } }];
+    } else {
+      const chosenSelector = selector || (mode === 'hero' ? '[data-hero], .hero, #hero, [class*="hero"], main > :first-child' : 'main, [role="main"], section');
+      const region = await bounded(cdp.evaluate(`(() => { const element = document.querySelector(${JSON.stringify(chosenSelector)}); if (!element) return null; const rect = element.getBoundingClientRect(); return { x: rect.left + scrollX, y: rect.top + scrollY, width: rect.width, height: rect.height }; })()`), clock, checkpointMs);
+      if (!region || ![region.x, region.y, region.width, region.height].every(Number.isFinite)) throw new Error(CAPTURE_ERROR);
+      const x = Math.max(0, Math.min(Math.floor(region.x), metrics.width - 1));
+      const y = Math.max(0, Math.min(Math.floor(region.y), metrics.height - 1));
+      const clipped = {
+        x, y,
+        width: Math.min(metrics.width - x, Math.ceil(region.width)),
+        height: Math.min(metrics.height - y, Math.ceil(region.height))
+      };
+      if (clipped.width < 1 || clipped.height < 1) throw new Error(CAPTURE_ERROR);
+      plans = [{ scrollY: 0, region: clipped, clip: clipped }];
+    }
     const screenshots = [];
-    for (let index = 0; index < checkpoints; index += 1) {
+    for (let index = 0; index < plans.length; index += 1) {
       active();
-      const y = Math.round(Math.max(0, metrics.height - metrics.viewportHeight) * index / Math.max(1, checkpoints - 1));
-      await bounded(cdp.evaluate(`scrollTo(0, ${y})`), clock, checkpointMs);
+      const plan = plans[index];
+      await bounded(cdp.evaluate(`scrollTo(0, ${plan.scrollY})`), clock, checkpointMs);
       await bounded(new Promise(resolve => clock.setTimeout(resolve, settleMs)), clock, checkpointMs);
-      const shot = await bounded(cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true }), clock, checkpointMs);
+      const screenshotOptions = {
+        format: 'png', fromSurface: true,
+        ...(plan.clip ? { captureBeyondViewport: true, clip: { ...plan.clip, scale: 1 } } : {})
+      };
+      const shot = await bounded(cdp.send('Page.captureScreenshot', screenshotOptions), clock, checkpointMs);
       if (typeof shot.data !== 'string' || Buffer.byteLength(shot.data, 'base64') > maxScreenshotBytes || Buffer.from(shot.data, 'base64').toString('base64') !== shot.data) throw new Error(CAPTURE_ERROR);
-      const screenshot = { y, png: shot.data };
+      const screenshot = { y: plan.scrollY, png: shot.data };
       screenshots.push(screenshot);
       await options.onScreenshot?.({
         ...screenshot,
+        sourceUrl: target.href,
         originalUrl: target.href,
         finalUrl: final.href,
         title: metrics.title,
         domain: final.hostname,
         viewport: { width, height, deviceScaleFactor: 1 },
-        checkpoint: { index, y, count: checkpoints },
+        preset,
+        mode,
+        region: plan.region,
+        scroll: { x: 0, y: plan.scrollY },
+        checkpoint: { index, y: plan.scrollY, count: plans.length },
         capturedAt,
         captureMethod: 'automated-browser',
-        captureStrategy: 'deterministic-scroll'
+        captureStrategy: strategy
       });
     }
-    return { ...metrics, originalUrl: target.href, finalUrl: final.href, hostname: final.hostname, viewport: { width, height, deviceScaleFactor: 1 }, screenshots, capturedAt, networkBytes: proxy.stats?.().usedBytes };
+    return {
+      ...metrics, sourceUrl: target.href, originalUrl: target.href, finalUrl: final.href,
+      hostname: final.hostname, viewport: { width, height, deviceScaleFactor: 1 },
+      preset, mode, screenshots, capturedAt, networkBytes: proxy.stats?.().usedBytes
+    };
   })();
 
   try {
