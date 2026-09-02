@@ -39,6 +39,7 @@ const tools = [
   { name: 'get_reference', description: 'Get a reference with paginated registered assets, targets, and moments.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), ...page }), 'referenceId') },
   { name: 'search_selections', description: 'Locate paginated selections by project, aspect, intent, or related reference title.', inputSchema: objectSchema({ projectId: string('Project ID', 128), aspect: string('Case-insensitive aspect filter', MAX_QUERY), query: string('Case-insensitive aspect, intent, or reference-title query', MAX_QUERY), ...page }) },
   { name: 'get_selection', description: 'Get a selection with its target, moment, reference, and asset.', inputSchema: required(objectSchema({ selectionId: string('Selection ID', 128) }), 'selectionId') },
+  { name: 'get_experience_sequence', description: 'Get one selected interaction or media target with its source and bounded ordered moments.', inputSchema: required(objectSchema({ selectionId: string('Selection ID', 128), ...page }), 'selectionId') },
   { name: 'get_creative_direction', description: 'Get versioned creative-direction export for one board, or all boards in one project.', inputSchema: objectSchema({ boardId: string('Board ID', 128), projectId: string('Project ID', 128) }) },
   { name: 'create_project', description: 'Add a project so an empty workspace can be bootstrapped.', inputSchema: required(objectSchema({ title: string('Title'), brief: string('Brief'), expectedRevision: { type: 'integer', minimum: 0 } }), 'title') },
   { name: 'create_reference', description: 'Add a reference and, for a saved website URL, queue one initial capture by default. Set capture to false to opt out.', inputSchema: required(objectSchema({ projectId: string('Project ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), tags: referenceTags, captureMethod: string('Capture method', 128), capture: { type: 'boolean', description: 'Override the shared default for this creation' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'projectId') },
@@ -72,7 +73,7 @@ const tools = [
   { name: 'get_implementation_preview', description: 'Get status and temporary resource URIs for an implementation preview capture.', inputSchema: required(objectSchema({ captureId: string('Opaque preview capture ID', 128) }), 'captureId') },
   { name: 'cancel_implementation_preview', description: 'Cancel a queued or running ephemeral implementation preview.', inputSchema: required(objectSchema({ captureId: string('Opaque preview capture ID', 128) }), 'captureId') }
 ];
-const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'list_reference_tags', 'get_reference', 'search_selections', 'get_selection', 'get_creative_direction', 'get_capture_status', 'get_implementation_preview']);
+const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'list_reference_tags', 'get_reference', 'search_selections', 'get_selection', 'get_experience_sequence', 'get_creative_direction', 'get_capture_status', 'get_implementation_preview']);
 for (const tool of tools) tool.annotations = {
   title: tool.name.replaceAll('_', ' '),
   readOnlyHint: readTools.has(tool.name),
@@ -175,6 +176,15 @@ function selectionDetail(workspace, selection) {
     reference,
     asset: target.assetId ? entity(workspace, 'assets', target.assetId) : null
   };
+}
+
+function compareMoments(left, right) {
+  if (left.start === undefined && right.start !== undefined) return 1;
+  if (left.start !== undefined && right.start === undefined) return -1;
+  if (left.start !== right.start) return left.start - right.start;
+  const created = left.createdAt.localeCompare(right.createdAt);
+  if (created) return created;
+  return left.id.localeCompare(right.id);
 }
 
 function mediaResource(asset) {
@@ -320,6 +330,22 @@ export function createMcpServer(options = {}) {
       return { revision, selections: found.items, total: found.total, offset: found.offset, nextOffset: found.nextOffset };
     }
     if (name === 'get_selection') return { revision, ...selectionDetail(workspace, entity(workspace, 'selections', args.selectionId)) };
+    if (name === 'get_experience_sequence') {
+      const detail = selectionDetail(workspace, entity(workspace, 'selections', args.selectionId));
+      const moments = paged(
+        workspace.moments.filter(moment => moment.targetId === detail.target.id).sort(compareMoments),
+        args
+      );
+      return {
+        revision,
+        experience: {
+          selection: detail.selection, selectedMoment: detail.moment, reference: detail.reference,
+          asset: detail.asset ? { ...detail.asset, resourceUri: mediaResource(detail.asset)?.uri } : null,
+          target: detail.target, moments: moments.items
+        },
+        page: { offset: moments.offset, nextOffset: moments.nextOffset, total: moments.total }
+      };
+    }
     if (name === 'get_creative_direction') {
       if (Boolean(args.boardId) === Boolean(args.projectId)) fail('INVALID_ARGUMENT', 'Provide exactly one of boardId or projectId');
       if (args.boardId) return { revision, creativeDirection: exportCreativeDirection(workspace, args.boardId) };

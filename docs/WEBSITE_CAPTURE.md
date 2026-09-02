@@ -172,13 +172,38 @@ returned `refloom://preview/...` resource. Each resource includes its expiry and
 the original/final URL, viewport, preset, mode, captured region, checkpoint,
 capture time, method, and strategy needed to reproduce the observation.
 
+For interaction or game-experience evidence, locate a Selection and call
+`get_experience_sequence` with its ID. The read returns the selected Aspect and
+Intent, source Reference, exact Target, selected Moment, attached Asset and its
+registered `resourceUri`, and a page of Moments for that same Target. Read the
+video or image bytes through that URI before implementing. Moments are ordered
+by stored start time; moments without a start follow timed moments, with stored
+creation time and opaque ID used only as deterministic tie-breakers. `offset`
+and `limit` page the timeline, and `limit` cannot exceed 100.
+
+The composition preserves `target.detail`, each Moment's exact start/end range,
+and `moment.state` as stored. Those open metadata objects may contain recorded
+observable state, input, or feedback, but Refloom neither requires those keys
+nor derives missing meaning. The Selection's optional `momentId` and returned
+selected Moment identify the specifically chosen evidence while the paginated
+list provides surrounding sequence context.
+
 The intended external loop is:
 
-1. Read Refloom Creative Direction and registered reference media.
-2. Change the implementation in the agent's own coding workspace.
-3. Start and poll an implementation preview capture.
-4. Read the temporary screenshots, evaluate them externally, and repeat.
-5. Cancel obsolete work with `cancel_implementation_preview`.
+1. Read Creative Direction, locate a Selection, and request its bounded
+   experience sequence.
+2. Follow pagination as needed and read its registered video or image resource.
+3. Change the implementation in the agent's own coding workspace.
+4. Start and poll an implementation preview capture.
+5. Read the temporary screenshots, evaluate the observation externally against
+   the stored evidence and Intent, and repeat.
+6. Cancel obsolete work with `cancel_implementation_preview`.
+
+`get_experience_sequence` is read-only and resolves every returned relationship
+from the authoritative workspace. Registered-media reads retain the existing
+authorization check that rejects bytes not owned by a current Asset. Preview
+capture remains an explicit open-world action with the existing URL policy and
+resource limits; the composition tool cannot fetch a URL or capture a preview.
 
 Preview bytes and metadata are process-local memory only. They are never Assets,
 References, Targets, Moments, workspace commits, object-store objects, or entries
