@@ -567,10 +567,10 @@ async function renderLibrary() {
     }, [sourceCue()]) : null;
     const momentText = imageCount > 1 ? `${imageCount} Moments` : '';
     const previewCue = interactivePreview ? element('p', {
-      className: 'meta', text: momentText || 'Video preview', 'aria-live': 'polite'
+      className: 'meta preview-cue', text: momentText || 'Video preview'
     }) : null;
     const previewControl = interactivePreview ? element('button', {
-      type: 'button', text: 'Preview', 'aria-label': `Preview ${name}`,
+      className: 'preview-control', type: 'button', text: 'Preview', 'aria-label': `Preview ${name}`,
       'aria-pressed': 'false'
     }) : null;
     const card = element('article', { className: 'reference-card' }, [

@@ -205,3 +205,20 @@ test('Interactive Auto UI is explicitly passive and uses the shared request fiel
     assert.match(editor, new RegExp(action));
   }
 });
+
+test('Reference cards provide bounded accessible motion previews', async () => {
+  const [source, css] = await Promise.all([read('src/app.js'), read('public/styles.css')]);
+  for (const snippet of [
+    "from './media-preview.js'", "addEventListener('pointerenter'", "addEventListener('pointerleave'",
+    "addEventListener('focusin'", "addEventListener('focusout'", "'(prefers-reduced-motion: reduce)'",
+    "'(pointer: coarse)'", 'IntersectionObserver', "addEventListener('visibilitychange'",
+    'video.muted = true', 'video.loop = true', 'video.playsInline = true',
+    "text: 'Preview'", '`${imageCount} Moments`', 'revokePreviewUrl'
+  ]) assert.ok(source.includes(snippet), `missing ${snippet}`);
+  const previewCue = source.slice(source.indexOf('const previewCue ='), source.indexOf('const previewControl ='));
+  assert.doesNotMatch(previewCue, /aria-live/);
+  for (const rule of [
+    '.preview-cue{', '.preview-control{', '@media(prefers-reduced-motion:reduce)',
+    '@media(pointer:coarse)'
+  ]) assert.ok(css.includes(rule), `missing ${rule}`);
+});
