@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { PERCEPTUAL_METRIC_VERSION, perceptualChangeScore } from './perceptual-image.js';
 
 export const PASSIVE_BLOCKED_ACTIONS = Object.freeze([
   'click', 'keyboard', 'pointer', 'form', 'wallet', 'permission',
@@ -77,6 +78,14 @@ function passiveAutomationProvenance(sample, settings) {
   };
 }
 
+function visualMetric(settings) {
+  return {
+    version: PERCEPTUAL_METRIC_VERSION,
+    threshold: settings.stabilityThreshold,
+    grid: 'max-16x16-ycbcr'
+  };
+}
+
 export function assertPassiveAutomationAction(type) {
   if (!['observe', 'wait', 'capture'].includes(type)) {
     throw new TypeError(`Passive capture blocks ${type}`);
@@ -111,27 +120,8 @@ export function validateInteractiveAutoSettings(options = {}) {
   return values;
 }
 
-function bytes(value) {
-  if (typeof value !== 'string') throw new TypeError('Visual sample must be canonical base64');
-  const result = Buffer.from(value, 'base64');
-  if (result.toString('base64') !== value) throw new TypeError('Visual sample must be canonical base64');
-  return result;
-}
-
 export function visualChangeScore(left, right) {
-  if (left === right) return 0;
-  const a = bytes(left);
-  const b = bytes(right);
-  if (!a.length && !b.length) return 0;
-  const slots = Math.min(256, Math.max(a.length, b.length));
-  let difference = 0;
-  for (let index = 0; index < slots; index += 1) {
-    const ai = a.length ? a[Math.min(a.length - 1, Math.floor(index * a.length / slots))] : 0;
-    const bi = b.length ? b[Math.min(b.length - 1, Math.floor(index * b.length / slots))] : 0;
-    difference += Math.abs(ai - bi) / 255;
-  }
-  const lengthDifference = Math.abs(a.length - b.length) / Math.max(1, a.length, b.length);
-  return Number(Math.min(1, difference / slots * 0.8 + lengthDifference * 0.2).toFixed(6));
+  return perceptualChangeScore(left, right);
 }
 
 export function selectTargetCanvas(canvases) {
@@ -306,6 +296,7 @@ export async function observeInteractiveAuto(cdp, options) {
     return { screenshots: [], autoCapture: {
       interactionMode: 'passive', completionStatus: 'complete', warnings,
       observedSamples: 0, selectedMoments: 0, blockedActions: PASSIVE_BLOCKED_ACTIONS,
+      visualMetric: visualMetric(settings),
       automation: passiveAutomationProvenance(null, settings)
     } };
   }
@@ -324,6 +315,7 @@ export async function observeInteractiveAuto(cdp, options) {
       threshold: settings.stabilityThreshold,
       intervalMs: settings.sampleIntervalMs
     },
+    visualMetric: visualMetric(settings),
     warnings: [...warnings],
     blockedActions: [...PASSIVE_BLOCKED_ACTIONS],
     automation: passiveAutomationProvenance(sample, settings),
@@ -336,6 +328,7 @@ export async function observeInteractiveAuto(cdp, options) {
     selectedMoments: screenshots.length,
     targetCanvas: initial.targetCanvas,
     stabilityCriteria: screenshots[0].stabilityCriteria,
+    visualMetric: visualMetric(settings),
     blockedActions: PASSIVE_BLOCKED_ACTIONS
   } };
 }

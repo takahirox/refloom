@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { deflateSync } from 'node:zlib';
 import {
   AUTO_ACTION_SCHEMA, PASSIVE_BLOCKED_ACTIONS, assertPassiveAutomationAction,
   findStableInitial, observeInteractiveAuto, selectRepresentativeMoments,
@@ -8,7 +9,51 @@ import {
 } from '../src/interactive-auto.js';
 import { normalizeCaptureRequest, publicCaptureResult } from '../src/capture-request.js';
 
-const png = value => Buffer.from(`deterministic-png-${value}`).toString('base64');
+const PNG_VALUES = Object.freeze({ a: 32, b: 128, c: 224, dark: 0, bright: 255 });
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function crc32(data) {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const name = Buffer.from(type, 'ascii');
+  const chunk = Buffer.alloc(data.length + 12);
+  chunk.writeUInt32BE(data.length, 0);
+  name.copy(chunk, 4);
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(Buffer.concat([name, data])), data.length + 8);
+  return chunk;
+}
+
+function png(value) {
+  const color = PNG_VALUES[value];
+  assert.notEqual(color, undefined);
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(16, 0);
+  header.writeUInt32BE(16, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const scanlines = Buffer.alloc(16 * 49);
+  for (let row = 0; row < 16; row += 1) {
+    const start = row * 49;
+    scanlines[start] = 0;
+    scanlines.fill(color, start + 1, start + 49);
+  }
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', deflateSync(scanlines)),
+    pngChunk('IEND', Buffer.alloc(0))
+  ]).toString('base64');
+}
 
 test('detects the largest visible canvas with observable WebGL activity deterministically', () => {
   const selected = selectTargetCanvas([
@@ -22,8 +67,8 @@ test('detects the largest visible canvas with observable WebGL activity determin
 });
 
 test('visual change, stability, and representative selection are deterministic', () => {
-  assert.equal(visualChangeScore(png('same'), png('same')), 0);
-  assert.ok(visualChangeScore(png('dark'), png('bright')) > 0);
+  assert.equal(visualChangeScore(png('a'), png('a')), 0);
+  assert.ok(visualChangeScore(png('dark'), png('bright')) > 0.6);
   const samples = [
     { index: 0, png: png('a'), changeScore: 0 },
     { index: 1, png: png('a'), changeScore: 0 },
@@ -37,6 +82,14 @@ test('visual change, stability, and representative selection are deterministic',
   const selected = selectRepresentativeMoments(samples, initial, 3);
   assert.deepEqual(selected.map(item => item.index), [3, 4]);
   assert.ok(selected.every(item => item.selectionScore > 0));
+});
+
+test('visual change scoring delegates to the perceptual image metric', async () => {
+  const source = await readFile(new URL('../src/interactive-auto.js', import.meta.url), 'utf8');
+  assert.match(source,
+    /import \{ PERCEPTUAL_METRIC_VERSION, perceptualChangeScore \} from '\.\/perceptual-image\.js';/);
+  assert.match(source, /return perceptualChangeScore\(left, right\);/);
+  assert.doesNotMatch(source, /function bytes\(/);
 });
 
 test('validation enforces hard observation limits and passive-only automation', () => {
@@ -78,6 +131,11 @@ test('bounded observer returns an explicit graceful non-WebGL result', async () 
   assert.deepEqual(result.screenshots, []);
   assert.equal(result.autoCapture.completionStatus, 'complete');
   assert.deepEqual(result.autoCapture.warnings, ['non_webgl_canvas']);
+  assert.deepEqual(result.autoCapture.visualMetric, {
+    version: 'perceptual-grid-v1',
+    threshold: 0,
+    grid: 'max-16x16-ycbcr'
+  });
 });
 
 test('bounded observer selects a stable initial frame and distinct moments', async () => {
@@ -104,6 +162,15 @@ test('bounded observer selects a stable initial frame and distinct moments', asy
   assert.equal(result.screenshots[0].selectionReason, 'initial_stable');
   assert.ok(result.screenshots.slice(1).every(item => item.selectionReason === 'representative_visual_change'));
   assert.equal(result.autoCapture.targetCanvas.selector, '#scene');
+  const visualMetric = {
+    version: 'perceptual-grid-v1',
+    threshold: 0,
+    grid: 'max-16x16-ycbcr'
+  };
+  assert.deepEqual(result.autoCapture.visualMetric, visualMetric);
+  for (const screenshot of result.screenshots) {
+    assert.deepEqual(screenshot.visualMetric, visualMetric);
+  }
   assert.equal(result.autoCapture.selectedMoments, 3);
   assert.ok(result.screenshots.every(item => item.automation.actions.every(
     action => Number.isSafeInteger(action.relativeTimestampMs)
@@ -129,7 +196,7 @@ test('observation failure retains useful frames as a bounded partial result', as
         bounds: { x: 0, y: 0, width: 640, height: 480 }
       }];
     },
-    send: async () => ({ data: png('useful') })
+    send: async () => ({ data: png('a') })
   }, {
     observationMs: 1_000,
     sampleIntervalMs: 500,
