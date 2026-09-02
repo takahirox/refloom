@@ -11,6 +11,7 @@ import {
 import {
   addReferenceTags, filterLibraryReferences, listReferenceTags, listReferenceTagSuggestions
 } from './reference-library.js';
+import { createMediaPreviewController, orderPreviewAssets } from './media-preview.js';
 
 const $ = selector => document.querySelector(selector);
 const repository = new WorkspaceRepository();
@@ -20,6 +21,11 @@ let objectUrls = [];
 let statusTimer;
 let dialogReturnFocus;
 let urlTagEditor;
+const previewControllers = new Set();
+const previewControls = new Map();
+let previewObserver;
+let activePreviewController;
+let previewCards = new WeakMap();
 const captureStates = new Map();
 const captureLabels = {
   queued: 'Queued', capturing: 'Capturing', complete: 'Complete', partial: 'Partially complete',
@@ -390,16 +396,68 @@ function selectionEditor(reference) {
   });
 }
 
+function createPreviewUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  objectUrls.push(url);
+  return url;
+}
+
+function revokePreviewUrl(url) {
+  const index = objectUrls.indexOf(url);
+  if (index >= 0) objectUrls.splice(index, 1);
+  URL.revokeObjectURL(url);
+}
+
+function syncPreviewControl(controller, active) {
+  const control = previewControls.get(controller);
+  if (!control) return;
+  control.textContent = active ? 'Stop preview' : 'Preview';
+  control.setAttribute('aria-label', active ? 'Stop preview' : 'Preview'); control.setAttribute('aria-pressed', String(active));
+  if (!active) delete control.dataset.manual;
+}
+
+function claimPreview(controller) {
+  if (activePreviewController && activePreviewController !== controller) activePreviewController.stop();
+  activePreviewController = controller;
+  syncPreviewControl(controller, true);
+  return true;
+}
+
+function releasePreview(controller) {
+  if (activePreviewController === controller) activePreviewController = undefined;
+  syncPreviewControl(controller, false);
+}
+
+function resetMediaPreviews() {
+  previewObserver?.disconnect();
+  previewObserver = undefined;
+  for (const controller of previewControllers) controller.destroy();
+  previewControllers.clear();
+  previewControls.clear();
+  previewCards = new WeakMap();
+  activePreviewController = undefined;
+  for (const url of [...objectUrls]) revokePreviewUrl(url);
+}
+
+function previewElement(asset, url) {
+  const attributes = { 'data-asset-id': asset.id, 'data-object-url': url };
+  if (asset.kind === 'video') {
+    const video = element('video', { className: 'preview video', src: url, controls: '', muted: '', loop: '', playsinline: '', preload: 'metadata', 'aria-label': 'Captured video preview', ...attributes });
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+    return video;
+  }
+  return element('img', { className: 'preview', src: url, alt: '', ...attributes });
+}
+
 async function mediaPreview(asset) {
   if (!asset) return element('div', { className: 'placeholder', text: 'URL reference' });
   const binaryId = blobIdFromLocator(asset.locator);
   if (!binaryId) return element('div', { className: 'placeholder', text: asset.kind.toUpperCase() });
   try {
     const blob = await repository.blob(binaryId);
-    const url = URL.createObjectURL(blob);
-    objectUrls.push(url);
-    if (asset.kind === 'video') return element('video', { className: 'preview video', src: url, controls: '', preload: 'metadata', 'aria-label': 'Captured video preview' });
-    return element('img', { className: 'preview', src: url, alt: '' });
+    return previewElement(asset, createPreviewUrl(blob));
   } catch { return element('div', { className: 'placeholder', text: 'Binary unavailable' }); }
 }
 
@@ -415,7 +473,19 @@ function iconControl(options, glyph) {
   ]);
 }
 
+function formatPreviewDuration(seconds) {
+  if (!Number.isFinite(seconds)) return 'Video preview';
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
 async function renderLibrary() {
+  resetMediaPreviews();
+  if ('IntersectionObserver' in globalThis) {
+    previewObserver = new IntersectionObserver(entries => {
+      for (const entry of entries) if (!entry.isIntersecting) previewCards.get(entry.target)?.stop();
+    });
+  }
   const allReferences = projectItems('references');
   const tags = listReferenceTags(allReferences);
   const suggestions = listReferenceTagSuggestions(allReferences).map(({ tag }) => tag);
@@ -430,9 +500,13 @@ async function renderLibrary() {
   const cards = [];
   for (const reference of references) {
     const assets = workspace.assets.filter(asset => asset.referenceId === reference.id);
+    const previewAssets = orderPreviewAssets(assets.filter(asset => blobIdFromLocator(asset.locator)));
+    const imageCount = previewAssets.filter(asset => asset.kind === 'image').length;
+    const hasVideo = previewAssets.some(asset => asset.kind === 'video');
+    const interactivePreview = imageCount > 1 || hasVideo;
     const cardTags = reference.tags.slice(0, MAX_CARD_TAGS);
     const remainingTags = reference.tags.length - cardTags.length;
-    const previewAsset = assets.find(asset => blobIdFromLocator(asset.locator)) ?? assets[0];
+    const previewAsset = previewAssets[0] ?? assets[0];
     const name = displayReference(reference);
     const edit = iconControl({
       className: 'icon-button', title: 'Edit details', 'aria-label': `Edit details for ${name}`
@@ -491,11 +565,21 @@ async function renderLibrary() {
       className: 'source-link', href: websiteUrl, target: '_blank', rel: 'noopener noreferrer',
       title: 'Open source website in a new tab', 'aria-label': sourceName
     }, [sourceCue()]) : null;
+    const momentText = imageCount > 1 ? `${imageCount} Moments` : '';
+    const previewCue = interactivePreview ? element('p', {
+      className: 'meta', text: momentText || 'Video preview', 'aria-live': 'polite'
+    }) : null;
+    const previewControl = interactivePreview ? element('button', {
+      type: 'button', text: 'Preview', 'aria-label': `Preview ${name}`,
+      'aria-pressed': 'false'
+    }) : null;
     const card = element('article', { className: 'reference-card' }, [
       element('div', { className: 'card-media' }, [mediaLink ?? preview, sourceLink, captureBadge]),
       element('div', { className: 'card-body' }, [
         element('h2', { className: 'card-title', text: name }),
         element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
+        previewCue,
+        previewControl,
         cardTags.length ? element('div', { className: 'card-tags', role: 'list', 'aria-label': 'Tags' }, [
           ...cardTags.map(tag => element('span', { className: 'tag-chip', role: 'listitem', text: tag })),
           remainingTags ? element('span', {
@@ -510,6 +594,109 @@ async function renderLibrary() {
         element('div', { className: 'card-tools' }, [edit, moreToggle, morePanel])
       ])
     ]);
+    if (interactivePreview) {
+      const cardMedia = card.querySelector('.card-media');
+      const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      const coarsePointer = globalThis.matchMedia?.('(pointer: coarse)').matches ?? false;
+      let controller, currentPreview = preview, activeMediaLink = mediaLink;
+      let activeSourceLink = sourceLink, posterFailed = !preview.matches('img,video');
+      const sourceAnchor = (className, child) => element('a', {
+        className, href: websiteUrl, target: '_blank', rel: 'noopener noreferrer',
+        title: 'Open source website in a new tab', 'aria-label': sourceName
+      }, [child]);
+      const mountPreview = node => {
+        activeMediaLink?.remove();
+        activeSourceLink?.remove();
+        currentPreview.remove();
+        if (websiteUrl && node.matches('video')) {
+          cardMedia.prepend(node);
+          activeMediaLink = null;
+          activeSourceLink = sourceAnchor('source-link', sourceCue());
+          cardMedia.insertBefore(activeSourceLink, captureBadge);
+        } else if (websiteUrl) {
+          activeMediaLink = sourceAnchor('media-link', node);
+          activeMediaLink.append(sourceCue());
+          cardMedia.prepend(activeMediaLink);
+          activeSourceLink = null;
+        } else {
+          cardMedia.prepend(node);
+        }
+        currentPreview = node;
+      };
+      const restorePoster = () => {
+        const poster = !posterFailed ? preview : element('div', {
+          className: 'placeholder', text: 'Binary unavailable',
+          'data-asset-id': previewAsset?.id
+        });
+        if (poster.matches('video')) {
+          poster.pause();
+          try { poster.currentTime = 0; } catch {}
+        }
+        mountPreview(poster);
+      };
+      const watchMedia = (node, asset) => {
+        if (node.matches('video')) node.addEventListener('loadedmetadata', () => {
+          if (node === currentPreview) previewCue.textContent = [momentText, formatPreviewDuration(node.duration)].filter(Boolean).join(' · ');
+        });
+        node.addEventListener('error', () => {
+          if (asset === previewAsset) posterFailed = true;
+          controller?.failed(asset);
+          if (node === currentPreview) restorePoster();
+        }, { once: true });
+        return node;
+      };
+      controller = createMediaPreviewController({
+        assets: previewAssets,
+        initialUrl: preview.dataset.objectUrl,
+        reducedMotion,
+        async load(asset) {
+          const binaryId = blobIdFromLocator(asset.locator);
+          if (!binaryId) throw new Error('Binary unavailable');
+          return repository.blob(binaryId);
+        },
+        createUrl: createPreviewUrl,
+        revokeUrl: revokePreviewUrl,
+        show({ asset, url, playing }) {
+          if (!url) { restorePoster(); return; }
+          const node = watchMedia(previewElement(asset, url), asset);
+          mountPreview(node);
+          if (node.matches('video')) {
+            node.muted = true;
+            if (playing) node.play().catch(() => {});
+            else {
+              node.pause();
+              try { node.currentTime = 0; } catch {}
+            }
+          }
+        },
+        claim: claimPreview,
+        release: releasePreview
+      });
+      watchMedia(preview, previewAsset);
+      previewControllers.add(controller);
+      previewControls.set(controller, previewControl);
+      previewCards.set(card, controller);
+      previewObserver?.observe(card);
+      card.addEventListener('pointerenter', event => {
+        if (!coarsePointer && event.pointerType !== 'touch') controller.start();
+      });
+      card.addEventListener('pointerleave', () => {
+        if (!card.contains(document.activeElement)) controller.stop();
+      });
+      card.addEventListener('focusin', () => controller.start());
+      card.addEventListener('focusout', event => {
+        if (!card.contains(event.relatedTarget)) controller.stop();
+      });
+      previewControl.addEventListener('click', async () => {
+        if (activePreviewController === controller && previewControl.dataset.manual === 'true') {
+          controller.stop();
+          return;
+        }
+        if (activePreviewController === controller) controller.stop(); controller.start({ immediate: true });
+        previewControl.dataset.manual = 'true';
+        await controller.manual();
+      });
+    }
     cards.push(card);
   }
   const filtering = query.trim() || exactTag;
@@ -551,7 +738,7 @@ function renderActivity() {
 }
 
 async function render() {
-  for (const url of objectUrls) URL.revokeObjectURL(url); objectUrls = [];
+  resetMediaPreviews();
   if (projectId && !find('projects', projectId)) projectId = workspace.projects[0]?.id;
   const project = activeProject();
   $('#project-select').replaceChildren(...workspace.projects.map(item => element('option', { value: item.id, text: item.title })));
@@ -588,6 +775,9 @@ async function exportBoard(kind) {
 
 function bindEvents() {
   $('#nav-toggle').addEventListener('click', event => { const open = $('#primary-nav').classList.toggle('open'); event.currentTarget.setAttribute('aria-expanded', String(open)); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') activePreviewController?.stop();
+  });
   window.addEventListener('hashchange', render);
   $('#new-project').addEventListener('click', () => projectEditor()); $('#welcome-create').addEventListener('click', () => projectEditor()); $('#edit-project').addEventListener('click', () => projectEditor(activeProject()));
   $('#project-select').addEventListener('change', event => { projectId = event.target.value; location.hash = 'library'; render(); });
@@ -660,5 +850,5 @@ async function start() {
   catch (error) { $('#fatal').hidden = false; $('#fatal').textContent = error.message; for (const control of document.querySelectorAll('button,input,select,textarea')) control.disabled = true; }
 }
 
-window.addEventListener('beforeunload', () => { for (const url of objectUrls) URL.revokeObjectURL(url); repository.close(); });
+window.addEventListener('beforeunload', () => { resetMediaPreviews(); repository.close(); });
 start();
