@@ -442,6 +442,7 @@ export async function captureWebsite(input, options = {}) {
           stabilityCriteria: selected.stabilityCriteria,
           selectionReason: selected.selectionReason,
           selectionScore: selected.selectionScore,
+          visualMetric: selected.visualMetric,
           warnings: selected.warnings,
           blockedActions: selected.blockedActions,
           automation: selected.automation,
