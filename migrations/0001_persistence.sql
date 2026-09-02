@@ -26,6 +26,14 @@ create table "references" (
   unique (id, project_id)
 );
 
+create table reference_tags (
+  reference_id text not null references "references"(id) on delete cascade,
+  position integer not null check (position >= 0),
+  tag text not null check (char_length(tag) between 1 and 64),
+  primary key (reference_id, position),
+  unique (reference_id, tag)
+);
+
 create table assets (
   id text primary key,
   project_id text not null references projects(id) on delete cascade,

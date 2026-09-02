@@ -67,6 +67,17 @@ test('create_project discovers and bootstraps an empty workspace', async t => {
   assert.deepEqual(tool.inputSchema.required, ['title']);
   assert.deepEqual(Object.keys(tool.inputSchema.properties), ['title', 'brief', 'expectedRevision']);
   assert.equal(tool.inputSchema.additionalProperties, false);
+  const emptyTags = await mcp.request('tools/call', { name: 'list_reference_tags', arguments: {} });
+  assert.deepEqual(emptyTags.result.structuredContent.tags, [
+    { tag: 'branding', referenceCount: 0 },
+    { tag: 'editorial', referenceCount: 0 },
+    { tag: 'illustration', referenceCount: 0 },
+    { tag: 'motion', referenceCount: 0 },
+    { tag: 'photography', referenceCount: 0 },
+    { tag: 'typography', referenceCount: 0 },
+    { tag: 'web-3d', referenceCount: 0 },
+    { tag: 'web-design', referenceCount: 0 }
+  ]);
   assert.deepEqual(tool.annotations, {
     title: 'create project', readOnlyHint: false, destructiveHint: false,
     idempotentHint: false, openWorldHint: false
@@ -91,6 +102,92 @@ test('create_project discovers and bootstraps an empty workspace', async t => {
   assert.equal(stale.result.structuredContent.error.code, 'REVISION_CONFLICT');
   assert.deepEqual(stale.result.structuredContent.error.details, { expectedRevision: 1, actualRevision: 2 });
   assert.equal(store.workspace.projects.length, 1);
+});
+
+test('MCP reference tags stay ordered across writes, reads, search, and discovery', async t => {
+  const store = fixture();
+  const mcp = client(store);
+  t.after(() => mcp.server.close());
+
+  const discovered = await mcp.request('tools/list');
+  const createTool = discovered.result.tools.find(tool => tool.name === 'create_reference');
+  const updateTool = discovered.result.tools.find(tool => tool.name === 'enrich_reference');
+  const tagTool = discovered.result.tools.find(tool => tool.name === 'list_reference_tags');
+  assert.deepEqual(createTool.inputSchema.properties.tags, {
+    type: 'array', description: 'Ordered reference tags', maxItems: 20,
+    items: { type: 'string', maxLength: 64 }
+  });
+  assert.deepEqual(updateTool.inputSchema.properties.tags, createTool.inputSchema.properties.tags);
+  assert.equal(tagTool.annotations.readOnlyHint, true);
+  assert.equal(tagTool.inputSchema.properties.limit.maximum, 100);
+
+  const created = await mcp.request('tools/call', { name: 'create_reference', arguments: {
+    projectId: 'project_one', title: 'Tagged study',
+    tags: ['Editorial Design', 'Motion', 'editorial-design'], expectedRevision: 1
+  } });
+  assert.deepEqual(created.result.structuredContent.entity.tags, ['editorial-design', 'motion']);
+
+  const detail = await mcp.request('tools/call', { name: 'get_reference', arguments: {
+    referenceId: created.result.structuredContent.entity.id
+  } });
+  assert.deepEqual(detail.result.structuredContent.reference.tags, ['editorial-design', 'motion']);
+
+  const queryMatch = await mcp.request('tools/call', { name: 'search_references', arguments: {
+    query: 'motion'
+  } });
+  assert.deepEqual(queryMatch.result.structuredContent.references[0].tags, ['editorial-design', 'motion']);
+  const tagMatch = await mcp.request('tools/call', { name: 'search_references', arguments: {
+    tag: 'Editorial Design'
+  } });
+  assert.deepEqual(tagMatch.result.structuredContent.references.map(reference => reference.id), [created.result.structuredContent.entity.id]);
+
+  const updated = await mcp.request('tools/call', { name: 'enrich_reference', arguments: {
+    referenceId: created.result.structuredContent.entity.id,
+    tags: ['Motion', 'Typography', 'motion'], expectedRevision: 2
+  } });
+  assert.deepEqual(updated.result.structuredContent.entity.tags, ['motion', 'typography']);
+  await mcp.request('tools/call', { name: 'create_reference', arguments: {
+    projectId: 'project_one', title: 'Second study',
+    tags: ['Motion', 'Editorial'], expectedRevision: 3
+  } });
+
+  const tags = await mcp.request('tools/call', { name: 'list_reference_tags', arguments: {
+    limit: 2
+  } });
+  assert.deepEqual(tags.result.structuredContent.tags, [
+    { tag: 'motion', referenceCount: 2 },
+    { tag: 'editorial', referenceCount: 1 }
+  ]);
+  assert.equal(tags.result.structuredContent.total, 8);
+  assert.equal(tags.result.structuredContent.nextOffset, 2);
+  const unused = await mcp.request('tools/call', { name: 'list_reference_tags', arguments: {
+    offset: 3
+  } });
+  assert.deepEqual(unused.result.structuredContent.tags, [
+    { tag: 'branding', referenceCount: 0 },
+    { tag: 'illustration', referenceCount: 0 },
+    { tag: 'photography', referenceCount: 0 },
+    { tag: 'web-3d', referenceCount: 0 },
+    { tag: 'web-design', referenceCount: 0 }
+  ]);
+  const suggestions = await mcp.request('tools/call', { name: 'list_reference_tags', arguments: {
+    query: 'graph'
+  } });
+  assert.deepEqual(suggestions.result.structuredContent.tags, [
+    { tag: 'typography', referenceCount: 1 },
+    { tag: 'photography', referenceCount: 0 }
+  ]);
+
+  for (const invalid of [
+    { projectId: 'project_one', tags: 'motion' },
+    { projectId: 'project_one', tags: [1] },
+    { projectId: 'project_one', tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`) }
+  ]) {
+    const response = await mcp.request('tools/call', { name: 'create_reference', arguments: invalid });
+    assert.equal(response.result.structuredContent.error.code, 'INVALID_ARGUMENT');
+  }
+  const invalidFilter = await mcp.request('tools/call', { name: 'search_references', arguments: { tag: '   ' } });
+  assert.equal(invalidFilter.result.structuredContent.error.code, 'INVALID_ARGUMENT');
 });
 
 test('stdio discovery, progressive reads, additive writes, media, errors, and revisions', async t => {

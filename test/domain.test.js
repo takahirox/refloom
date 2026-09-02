@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ValidationError, createWorkspace, createProject, updateProject, createReference,
+  ValidationError, createWorkspace, createProject, updateProject, createReference, updateReference,
   createAsset, createTarget, createMoment, createSelection, createBoard, reorderBoard,
   removeFromBoard, recordSignal, deleteReference, deleteProject, exportCreativeDirection,
   exportBoardMarkdown, exportWorkspace, importWorkspace, validateWorkspace,
@@ -11,7 +11,9 @@ import {
 function fixture() {
   let workspace = createWorkspace();
   workspace = createProject(workspace, { id: 'p1', title: 'Campaign', brief: 'Quiet confidence' });
-  workspace = createReference(workspace, { id: 'r1', projectId: 'p1', title: 'Film', sourceUrl: 'https://example.test/film', captureMethod: 'url' });
+  workspace = createReference(workspace, {
+    id: 'r1', projectId: 'p1', title: 'Film', sourceUrl: 'https://example.test/film', captureMethod: 'url', tags: [' Editorial ', 'Slow—Motion', 'ＥＤＩＴＯＲＩＡＬ']
+  });
   workspace = createAsset(workspace, { id: 'a1', referenceId: 'r1', kind: 'video', locator: 'local://film.mp4', provenance: { sourceUrl: 'https://example.test/film' } });
   workspace = createTarget(workspace, { id: 't1', referenceId: 'r1', assetId: 'a1', kind: 'frame', detail: { x: 10, y: 20 } });
   workspace = createMoment(workspace, { id: 'm1', targetId: 't1', label: 'Reveal', start: 3.5, end: 4.2 });
@@ -30,17 +32,30 @@ test('create and update operations return new workspaces without mutating input'
   assert.notEqual(updated, created);
 });
 
-test('website capture defaults on, is immutable, and upgrades legacy workspaces', () => {
+test('Reference tags normalize, deduplicate, update immutably, and stay bounded', () => {
+  let workspace = createProject(createWorkspace(), { id: 'p1', title: 'One' });
+  workspace = createReference(workspace, { id: 'r1', projectId: 'p1' });
+  assert.deepEqual(workspace.references[0].tags, []);
+  const updated = updateReference(workspace, 'r1', { tags: ['  Art Direction ', 'art—direction', 'ＦＩＬＭ'] });
+  assert.deepEqual(updated.references[0].tags, ['art-direction', 'film']);
+  assert.deepEqual(workspace.references[0].tags, []);
+  assert.throws(() => createReference(workspace, { projectId: 'p1', tags: 'film' }), /array/);
+  assert.throws(() => createReference(workspace, { projectId: 'p1', tags: Array(21).fill('film') }), /at most 20/);
+  assert.throws(() => createReference(workspace, { projectId: 'p1', tags: ['x'.repeat(65)] }), /at most 64/);
+});
+
+test('workspace version 2 requires explicit capture settings', () => {
   const original = createWorkspace();
+  assert.equal(original.version, 2);
   assert.deepEqual(original.settings, { automaticWebsiteCapture: true });
   const disabled = updateWorkspaceSettings(original, { automaticWebsiteCapture: false });
   assert.equal(disabled.settings.automaticWebsiteCapture, false);
   assert.equal(original.settings.automaticWebsiteCapture, true);
   assert.throws(() => updateWorkspaceSettings(original, { unknown: true }), /invalid/);
 
-  const legacy = structuredClone(original);
-  delete legacy.settings;
-  assert.deepEqual(importWorkspace(legacy).settings, { automaticWebsiteCapture: true });
+  const invalid = structuredClone(original);
+  delete invalid.settings;
+  assert.throws(() => importWorkspace(invalid), error => error.issues.some(issue => issue.path === 'settings'));
 });
 
 test('selection preserves reference, asset target, moment, aspect, and intent precision', () => {
@@ -110,11 +125,12 @@ test('signals accept observable events and reject preference inferences', () => 
 test('structured export is versioned, ordered, and contains provenance', () => {
   const output = exportCreativeDirection(fixture(), 'b1');
   assert.equal(output.format, 'refloom.creative-direction');
-  assert.equal(output.version, 1);
+  assert.equal(output.version, 2);
   assert.equal(output.project.id, 'p1');
   assert.equal(output.board.id, 'b1');
   assert.equal(output.selections[0].selection.id, 's1');
   assert.equal(output.selections[0].reference.sourceUrl, 'https://example.test/film');
+  assert.deepEqual(output.selections[0].reference.tags, ['editorial', 'slow-motion']);
   assert.deepEqual(output.selections[0].asset.provenance, { sourceUrl: 'https://example.test/film' });
   assert.equal(output.selections[0].moment.id, 'm1');
 });
@@ -124,6 +140,7 @@ test('Markdown export is human readable', () => {
   assert.match(markdown, /^# Direction/m);
   assert.match(markdown, /## Pacing/);
   assert.match(markdown, /Intent: Use a similarly restrained reveal/);
+  assert.match(markdown, /Reference tags: editorial, slow-motion/);
   assert.match(markdown, /Moment: Reveal/);
 });
 
@@ -143,6 +160,12 @@ test('import rejects malformed JSON, unsupported versions, and missing collectio
   const missing = createWorkspace();
   delete missing.assets;
   assert.throws(() => importWorkspace(missing), error => error instanceof ValidationError && error.issues.some(x => x.path === 'assets'));
+  const missingTags = fixture();
+  delete missingTags.references[0].tags;
+  assert.throws(() => importWorkspace(missingTags), error => error.issues.some(x => x.path === 'references[0].tags'));
+  const nonCanonical = fixture();
+  nonCanonical.references[0].tags = ['Editorial'];
+  assert.throws(() => importWorkspace(nonCanonical), error => error.issues.some(x => x.path === 'references[0].tags'));
 });
 
 test('import rejects malformed entity shapes and missing required fields', () => {

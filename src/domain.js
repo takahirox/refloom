@@ -1,5 +1,7 @@
-export const WORKSPACE_VERSION = 1;
-export const CREATIVE_DIRECTION_VERSION = 1;
+import { isCanonicalReferenceTags, normalizeReferenceTags } from './reference-tags.js';
+
+export const WORKSPACE_VERSION = 2;
+export const CREATIVE_DIRECTION_VERSION = 2;
 export const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({ automaticWebsiteCapture: true });
 
 const COLLECTIONS = ['projects', 'references', 'assets', 'targets', 'moments', 'selections', 'boards', 'signals'];
@@ -79,6 +81,7 @@ export function createReference(workspace, input) {
     id: input.id ?? id('reference'), projectId: input.projectId,
     title: optional(input.title, 'title'), sourceUrl: optional(input.sourceUrl, 'sourceUrl'),
     creator: optional(input.creator, 'creator'), notes: optional(input.notes, 'notes'),
+    tags: normalizeReferenceTags(input.tags),
     capturedAt: input.capturedAt ?? now(), captureMethod: required(input.captureMethod ?? 'manual', 'captureMethod')
   }));
 }
@@ -87,6 +90,7 @@ export function updateReference(workspace, referenceId, changes) {
   need(workspace, 'references', referenceId);
   const allowed = {};
   for (const field of ['title', 'sourceUrl', 'creator', 'notes']) if (field in changes) allowed[field] = optional(changes[field], field);
+  if (changes.tags !== undefined) allowed.tags = normalizeReferenceTags(changes.tags);
   return update(workspace, 'references', referenceId, allowed);
 }
 
@@ -215,6 +219,7 @@ export function exportBoardMarkdown(workspace, boardId) {
   if (data.project.brief) lines.push(data.project.brief, '');
   for (const item of data.selections) {
     lines.push(`## ${item.selection.aspect}`, '', `Intent: ${item.selection.intent}`, `Reference: ${item.reference.title ?? item.reference.sourceUrl ?? item.reference.id}`);
+    lines.push(`Reference tags: ${item.reference.tags.join(', ')}`);
     if (item.asset) lines.push(`Asset: ${item.asset.locator}`);
     if (item.moment) lines.push(`Moment: ${item.moment.label ?? `${item.moment.start ?? ''}–${item.moment.end ?? ''}`}`);
     lines.push('');
@@ -231,14 +236,6 @@ export function importWorkspace(input) {
   let parsed;
   try { parsed = typeof input === 'string' ? JSON.parse(input) : copy(input); }
   catch { throw new ValidationError([{ path: '$', message: 'invalid JSON' }]); }
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    if (parsed.settings === undefined) parsed.settings = copy(DEFAULT_WORKSPACE_SETTINGS);
-    else if (parsed.settings && typeof parsed.settings === 'object'
-      && !Array.isArray(parsed.settings)
-      && parsed.settings.automaticWebsiteCapture === undefined) {
-      parsed.settings.automaticWebsiteCapture = true;
-    }
-  }
   validateWorkspace(parsed);
   return copy(parsed);
 }
@@ -295,6 +292,7 @@ export function validateWorkspace(workspace) {
     stringField(x, 'capturedAt', path);
     stringField(x, 'captureMethod', path);
     for (const field of ['title', 'sourceUrl', 'creator', 'notes']) optionalString(x, field, path);
+    if (!isCanonicalReferenceTags(x.tags)) issues.push({ path: `${path}.tags`, message: 'must be a canonical unique Reference tag array' });
   });
   workspace.assets.forEach((x, i) => {
     if (!isRecord(x)) return;

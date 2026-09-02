@@ -19,6 +19,7 @@ import { decodeBackup, encodeBackup, referencedBlobIds } from './storage.js';
 const SELECTS = Object.freeze({
   projects: 'select * from projects',
   references: 'select * from "references"',
+  reference_tags: 'select * from reference_tags order by reference_id, position',
   assets: 'select * from assets',
   targets: 'select * from targets',
   moments: 'select * from moments',

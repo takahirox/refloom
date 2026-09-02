@@ -2,7 +2,7 @@ import { createWorkspace, importWorkspace, validateWorkspace } from './domain.js
 
 export const BLOB_PREFIX = 'blob:';
 export const BACKUP_FORMAT = 'refloom.workspace-backup';
-export const BACKUP_VERSION = 2;
+export const BACKUP_VERSION = 3;
 
 export class RevisionConflictError extends Error {
   constructor(message = 'This workspace changed in another process. The latest version has been reloaded; review your change and try again.') { super(message); this.name = 'RevisionConflictError'; }
@@ -115,7 +115,7 @@ export function encodeBackup(workspace, binaries = []) {
 export function decodeBackup(text) {
   let value;
   try { value = JSON.parse(text); } catch { throw new TypeError('Backup is not valid JSON'); }
-  if (!value || value.version === 1 || value.version !== BACKUP_VERSION) throw new TypeError('Unsupported Refloom backup version');
+  if (!value || value.version !== BACKUP_VERSION) throw new TypeError('Unsupported Refloom backup version');
   if (value.format !== BACKUP_FORMAT || !Array.isArray(value.binaries)) throw new TypeError('Unsupported Refloom backup');
   const workspace = clonedWorkspace(value.workspace);
   const required = referencedBlobIds(workspace);

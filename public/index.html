@@ -51,6 +51,7 @@
           <h2>Save a URL</h2>
           <label for="capture-url">Source URL</label>
           <div class="inline"><input id="capture-url" name="url" type="url" required placeholder="https://example.com"><button class="primary" type="submit">Save</button></div>
+          <div id="url-tags"></div>
           <p class="hint">The URL is saved first. Initial website capture is on by default and can be disabled below.</p>
           <label class="check-option"><input id="capture-website" name="captureWebsite" type="checkbox" aria-controls="capture-settings" checked> Automatically capture after saving</label>
           <fieldset id="capture-settings" class="capture-settings">
@@ -70,7 +71,7 @@
           <input id="file-input" class="sr-only" type="file" accept="image/*,video/*" multiple>
         </div>
       </div>
-      <div class="toolbar"><label for="library-search">Filter references</label><input id="library-search" type="search" placeholder="Title, creator, URL, notes"></div>
+      <div class="toolbar library-toolbar"><label for="library-search">Search references</label><input id="library-search" type="search" placeholder="Title, creator, URL, notes, tags"><label for="library-tag">Tag</label><select id="library-tag"><option value="">All tags</option></select></div>
       <div id="reference-list" class="card-grid" aria-live="polite"></div>
     </section>
 

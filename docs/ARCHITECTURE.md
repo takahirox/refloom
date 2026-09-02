@@ -16,7 +16,7 @@ The browser code is separated into these boundaries:
 
 - `domain.js`: immutable workspace operations, relationships, validation,
   deletion cascades, factual signals, and creative-direction export.
-- `storage.js`: browser HTTP repository and backup-v2 encoding/decoding.
+- `storage.js`: browser HTTP repository and backup-v3 encoding/decoding.
 - `postgres-workspace-repository.js`: normalized relational reconstruction,
   revision transactions, backup snapshots, and authorized media access.
 - `s3-media-store.js`: immutable verified media writes/reads and bounded orphan
@@ -67,12 +67,14 @@ reference, and advances the revision exactly once. A database failure after an
 upload leaves a safe orphan; grace-based bounded cleanup removes it later.
 
 The same-origin API loads and commits complete workspaces, reads referenced
-media, and imports/exports backup version 2. Host and Origin checks,
+media, and imports/exports backup version 3. Host and Origin checks,
 JSON and body limits, validation, and optimistic revisions protect the local
 boundary. It intentionally has no CORS policy and is not a public listener.
 
-There is no IndexedDB or filesystem authority/migration path. `localStorage`
-contains only the current project ID.
+There is no IndexedDB or filesystem authority/migration path. The ordered
+Reference-tag cutover requires a reset PostgreSQL database. Backup version 3 is
+the only supported backup contract; versions 1 and 2 are rejected without a
+reader or upgrade shim. `localStorage` contains only the current project ID.
 Object URLs used for previews are temporary presentation resources, not durable
 storage.
 

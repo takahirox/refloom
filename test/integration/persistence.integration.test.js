@@ -31,7 +31,7 @@ function fixture() {
   let workspace = createProject(createWorkspace(), { id: 'project_1', title: 'Integration' });
   workspace = createReference(workspace, {
     id: 'reference_1', projectId: 'project_1', title: 'Source',
-    sourceUrl: 'https://example.com', captureMethod: 'integration'
+    sourceUrl: 'https://example.com', captureMethod: 'integration', tags: ['Visual Study', 'motion']
   });
   workspace = createAsset(workspace, {
     id: 'asset_1', referenceId: 'reference_1', kind: 'image',
@@ -64,6 +64,7 @@ test('PostgreSQL and S3 are one authoritative path for repository, HTTP, and MCP
   }]);
   assert.equal(committed.revision, 1);
   assert.deepEqual(committed.workspace.boards[0].selectionIds, ['selection_1']);
+  assert.deepEqual(committed.workspace.references[0].tags, ['visual-study', 'motion']);
   assert.deepEqual((await writer.mediaInfo('media_1')).contents, bytes);
 
   const stale = repository();
@@ -199,5 +200,10 @@ test('PostgreSQL and S3 are one authoritative path for repository, HTTP, and MCP
     "select table_name from information_schema.tables where table_schema = 'public' order by table_name"
   );
   assert.ok(tables.rows.some(row => row.table_name === 'projects'));
+  assert.ok(tables.rows.some(row => row.table_name === 'reference_tags'));
   assert.ok(tables.rows.some(row => row.table_name === 'media_objects'));
+  const tags = await writer.pool.query(
+    'select tag from reference_tags where reference_id = $1 order by position', ['reference_1']
+  );
+  assert.deepEqual(tags.rows.map(row => row.tag), ['visual-study', 'motion']);
 });

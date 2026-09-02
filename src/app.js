@@ -8,6 +8,9 @@ import { BLOB_PREFIX, RevisionConflictError, WorkspaceRepository, blobIdFromLoca
 import {
   displayReference, formatMoment, formatSignal, safeExternalWebsiteUrl, safeFilename
 } from './ui-format.js';
+import {
+  addReferenceTags, filterLibraryReferences, listReferenceTags, listReferenceTagSuggestions
+} from './reference-library.js';
 
 const $ = selector => document.querySelector(selector);
 const repository = new WorkspaceRepository();
@@ -16,11 +19,13 @@ let projectId = readStoredProject();
 let objectUrls = [];
 let statusTimer;
 let dialogReturnFocus;
+let urlTagEditor;
 const captureStates = new Map();
 const captureLabels = {
   queued: 'Queued', capturing: 'Capturing', complete: 'Complete', partial: 'Partially complete',
   failed: 'Failed', cancelled: 'Cancelled', skipped: 'Skipped', idle: 'Not started'
 };
+const MAX_CARD_TAGS = 3;
 
 function readStoredProject() {
   try { return globalThis.localStorage?.getItem('refloom.project') ?? undefined; }
@@ -57,6 +62,74 @@ function field(label, name, value = '', options = {}) {
     : element('input', { id, name, type: options.type || 'text', placeholder: options.placeholder, required: options.required, min: options.min, step: options.step }, []);
   control.value = value ?? '';
   return element('div', { className: 'field' }, [element('label', { for: id, text: label }), control]);
+}
+
+function tagEditor(initialTags = [], key = 'reference') {
+  let tags = [...initialTags];
+  let suggestions = [];
+  const inputId = `field-tags-${key}`;
+  const helpId = `${inputId}-help`;
+  const statusId = `${inputId}-status`;
+  const suggestionId = `${inputId}-suggestions`;
+  const chips = element('div', { className: 'tag-chip-list', role: 'list', 'aria-label': 'Selected tags' });
+  const input = element('input', {
+    id: inputId, type: 'text', list: suggestionId, placeholder: 'Type a tag',
+    autocomplete: 'off', 'aria-describedby': `${helpId} ${statusId}`
+  });
+  const datalist = element('datalist', { id: suggestionId });
+  const status = element('span', { id: statusId, className: 'sr-only', 'aria-live': 'polite' });
+
+  const renderTags = () => {
+    chips.replaceChildren(...tags.map(tag => {
+      const remove = element('button', {
+        type: 'button', className: 'tag-chip tag-remove', text: `${tag} ×`,
+        'aria-label': `Remove tag ${tag}`
+      });
+      remove.addEventListener('click', () => {
+        tags = tags.filter(value => value !== tag);
+        status.textContent = `${tag} removed.`;
+        renderTags();
+        input.focus();
+      });
+      return element('span', { role: 'listitem' }, [remove]);
+    }));
+    datalist.replaceChildren(...suggestions.filter(tag => !tags.includes(tag))
+      .map(tag => element('option', { value: tag })));
+  };
+  const consume = value => {
+    const next = addReferenceTags(tags, value);
+    const added = next.filter(tag => !tags.includes(tag));
+    tags = next;
+    input.value = '';
+    input.setCustomValidity('');
+    if (added.length) status.textContent = `${added.join(', ')} added.`;
+    renderTags();
+  };
+  const consumeOrReport = () => {
+    try { consume(input.value); }
+    catch (error) { input.setCustomValidity(error.message); input.reportValidity(); }
+  };
+  input.addEventListener('keydown', event => {
+    if (event.isComposing || !['Enter', ','].includes(event.key)) return;
+    event.preventDefault();
+    consumeOrReport();
+  });
+  input.addEventListener('input', () => {
+    input.setCustomValidity('');
+    if (input.value.includes(',')) consumeOrReport();
+  });
+  input.addEventListener('change', consumeOrReport);
+  renderTags();
+
+  return {
+    node: element('div', { className: 'field tag-field' }, [
+      element('label', { for: inputId, text: 'Tags (optional)' }), chips, input, datalist,
+      element('p', { id: helpId, className: 'hint', text: 'Press Enter or comma to add a tag. Choose existing tags for consistent organization.' }), status
+    ]),
+    values() { if (input.value.trim()) consume(input.value); return [...tags]; },
+    clear() { tags = []; input.value = ''; input.setCustomValidity(''); renderTags(); },
+    setSuggestions(values) { suggestions = [...values]; renderTags(); }
+  };
 }
 
 function activeProject() { return workspace.projects.find(project => project.id === projectId); }
@@ -242,12 +315,19 @@ async function captureFiles(files, referenceId) {
 }
 
 function referenceEditor(reference) {
+  const tags = tagEditor(reference.tags, reference.id);
+  tags.setSuggestions(listReferenceTagSuggestions(projectItems('references')).map(({ tag }) => tag));
   openEditor('Reference details', [
     field('Title', 'title', reference.title), field('Source URL', 'sourceUrl', reference.sourceUrl, { type: 'url' }),
-    field('Creator', 'creator', reference.creator), field('Notes', 'notes', reference.notes, { type: 'textarea' })
+    field('Creator', 'creator', reference.creator), field('Notes', 'notes', reference.notes, { type: 'textarea' }),
+    tags.node
   ], async data => {
-    let next = updateReference(workspace, reference.id, Object.fromEntries(data));
-    next = signal(next, 'enrich', { type: 'reference', id: reference.id }, { fields: ['title', 'sourceUrl', 'creator', 'notes'].filter(name => data.get(name)) });
+    const changes = Object.fromEntries(data);
+    changes.tags = tags.values();
+    let next = updateReference(workspace, reference.id, changes);
+    const fields = ['title', 'sourceUrl', 'creator', 'notes'].filter(name => data.get(name));
+    if (changes.tags.join('\0') !== reference.tags.join('\0')) fields.push('tags');
+    next = signal(next, 'enrich', { type: 'reference', id: reference.id }, { fields });
     await commit(next, [], 'Reference updated');
   });
 }
@@ -309,11 +389,22 @@ function iconControl(options, glyph) {
 }
 
 async function renderLibrary() {
-  const query = $('#library-search').value.trim().toLowerCase();
-  const references = projectItems('references').filter(reference => [reference.title, reference.sourceUrl, reference.creator, reference.notes].filter(Boolean).join(' ').toLowerCase().includes(query));
+  const allReferences = projectItems('references');
+  const tags = listReferenceTags(allReferences);
+  const suggestions = listReferenceTagSuggestions(allReferences).map(({ tag }) => tag);
+  const currentTag = $('#library-tag').value;
+  $('#library-tag').replaceChildren(element('option', { value: '', text: 'All tags' }),
+    ...tags.map(tag => element('option', { value: tag, text: tag })));
+  $('#library-tag').value = tags.includes(currentTag) ? currentTag : '';
+  urlTagEditor.setSuggestions(suggestions);
+  const query = $('#library-search').value;
+  const exactTag = $('#library-tag').value;
+  const references = filterLibraryReferences(allReferences, { query, tag: exactTag });
   const cards = [];
   for (const reference of references) {
     const assets = workspace.assets.filter(asset => asset.referenceId === reference.id);
+    const cardTags = reference.tags.slice(0, MAX_CARD_TAGS);
+    const remainingTags = reference.tags.length - cardTags.length;
     const previewAsset = assets.find(asset => blobIdFromLocator(asset.locator)) ?? assets[0];
     const name = displayReference(reference);
     const edit = iconControl({
@@ -380,6 +471,13 @@ async function renderLibrary() {
       element('div', { className: 'card-body' }, [
         element('h2', { className: 'card-title', text: name }),
         element('p', { className: 'meta', text: [reference.creator, `${assets.length} asset${assets.length === 1 ? '' : 's'}`, new Date(reference.capturedAt).toLocaleString()].filter(Boolean).join(' · ') }),
+        cardTags.length ? element('div', { className: 'card-tags', role: 'list', 'aria-label': 'Tags' }, [
+          ...cardTags.map(tag => element('span', { className: 'tag-chip', role: 'listitem', text: tag })),
+          remainingTags ? element('span', {
+            className: 'tag-chip tag-overflow', role: 'listitem', text: `+${remainingTags}`,
+            'aria-label': `${remainingTags} more tag${remainingTags === 1 ? '' : 's'}`
+          }) : null
+        ]) : null,
         reference.notes ? element('p', { className: 'card-note', text: reference.notes }) : null
       ]),
       element('footer', { className: 'card-actions' }, [
@@ -389,7 +487,8 @@ async function renderLibrary() {
     ]);
     cards.push(card);
   }
-  $('#reference-list').replaceChildren(...(cards.length ? cards : [element('p', { className: 'empty', text: query ? 'No references match this filter.' : 'No references yet. Save a URL, choose a file, drop one here, or paste an image.' })]));
+  const filtering = query.trim() || exactTag;
+  $('#reference-list').replaceChildren(...(cards.length ? cards : [element('p', { className: 'empty', text: filtering ? 'No references match these filters.' : 'No references yet. Save a URL, choose a file, drop one here, or paste an image.' })]));
 }
 
 function renderBoard() {
@@ -472,7 +571,10 @@ function bindEvents() {
     const form = event.currentTarget;
     const data = new FormData(form);
     const url = data.get('url');
-    let next = createReference(workspace, { projectId, sourceUrl: url, captureMethod: 'url' });
+    let tags;
+    try { tags = urlTagEditor.values(); }
+    catch (error) { announce(error.message, true); return; }
+    let next = createReference(workspace, { projectId, sourceUrl: url, tags, captureMethod: 'url' });
     const reference = next.references.at(-1);
     next = createAsset(next, { referenceId: reference.id, kind: 'url', locator: url, provenance: { captureMethod: 'manual-url' } });
     next = signal(next, 'capture', { type: 'reference', id: reference.id }, { method: 'url' });
@@ -486,6 +588,7 @@ function bindEvents() {
         ...(optedIn ? { captureSettings: { ...settings, maxRedirects: 10 } } : {})
       });
       form.reset();
+      urlTagEditor.clear();
       applyCaptureDefault();
       const capture = result.captures?.find(item => item.referenceId === reference.id)
         ?? { referenceId: reference.id, status: 'skipped', reason: 'explicit_opt_out' };
@@ -515,7 +618,8 @@ function bindEvents() {
   drop.addEventListener('drop', event => captureFiles(event.dataTransfer.files).catch(error => announce(error.message, true)));
   drop.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('#choose-files').click(); } });
   document.addEventListener('paste', event => { if (!activeProject() || event.target.matches('input,textarea')) return; const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); captureFiles(files).catch(error => announce(error.message, true)); } });
-  $('#library-search').addEventListener('input', renderLibrary); $('#aspect-filter').addEventListener('change', renderBoard);
+  $('#library-search').addEventListener('input', renderLibrary); $('#library-tag').addEventListener('change', renderLibrary);
+  $('#aspect-filter').addEventListener('change', renderBoard);
   $('#export-json').addEventListener('click', () => exportBoard('json')); $('#export-markdown').addEventListener('click', () => exportBoard('markdown'));
   $('#backup').addEventListener('click', async () => { try { download('refloom-workspace-backup.json', await repository.exportBackup(workspace), 'application/json'); announce('Workspace backup downloaded'); } catch (error) { announce(error.message, true); } });
   $('#restore-file').addEventListener('change', async event => { try { if (!await confirmAction('Replace the current workspace with this backup?')) return; workspace = await repository.importBackup(await event.target.files[0].text()); projectId = workspace.projects[0]?.id; location.hash = 'library'; applyCaptureDefault(); await render(); announce('Workspace restored'); } catch (error) { announce(`Import failed: ${error.message}`, true); } finally { event.target.value = ''; } });
@@ -528,6 +632,8 @@ async function start() {
   try {
     await repository.open();
     workspace = await repository.load();
+    urlTagEditor = tagEditor([], 'capture');
+    $('#url-tags').replaceChildren(urlTagEditor.node);
     applyCaptureDefault();
     await render();
   }

@@ -169,3 +169,26 @@ test('reference card controls keep 44px targets, responsive spacing, and theme h
   const dark = css.slice(css.indexOf('@media(prefers-color-scheme:dark)'));
   for (const rule of ['.more-panel{background:', '.media-source{background:', '.capture-badge{background:']) assert.ok(dark.includes(rule), `missing dark ${rule}`);
 });
+
+
+test('Library tags have accessible entry, suggestions, chips, and exact filtering', async () => {
+  const [html, source, css] = await Promise.all([
+    read('public/index.html'), read('src/app.js'), read('public/styles.css')
+  ]);
+  for (const snippet of [
+    'id="url-tags"', 'id="library-tag"><option value="">All tags</option>',
+    'placeholder="Title, creator, URL, notes, tags"'
+  ]) assert.ok(html.includes(snippet), `missing ${snippet}`);
+  for (const snippet of [
+    "!['Enter', ','].includes(event.key)", "className: 'tag-chip tag-remove'",
+    "'aria-label': `Remove tag ${tag}`", "className: 'sr-only', 'aria-live': 'polite'",
+    'tags = urlTagEditor.values()', 'changes.tags = tags.values()',
+    'filterLibraryReferences(allReferences, { query, tag: exactTag })',
+    'listReferenceTagSuggestions(allReferences).map(({ tag }) => tag)',
+    'const MAX_CARD_TAGS = 3', 'reference.tags.slice(0, MAX_CARD_TAGS)',
+    "className: 'tag-chip tag-overflow'", "role: 'listitem'"
+  ]) assert.ok(source.includes(snippet), `missing ${snippet}`);
+  for (const rule of ['.tag-chip-list,.card-tags{', '.tag-remove{', '.card-tags .tag-chip{', '.card-tags .tag-overflow{']) {
+    assert.ok(css.includes(rule), `missing ${rule}`);
+  }
+});

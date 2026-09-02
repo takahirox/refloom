@@ -26,7 +26,8 @@ function completeWorkspace() {
   workspace = createProject(workspace, { id: 'project-1', title: 'Direction', brief: 'Brief' });
   workspace = createReference(workspace, {
     id: 'reference-1', projectId: 'project-1', title: 'Reference', sourceUrl: 'https://example.test',
-    creator: 'Creator', notes: 'Notes', capturedAt: '2025-01-01T01:02:03.004Z', captureMethod: 'manual'
+    creator: 'Creator', notes: 'Notes', tags: ['Motion Study', 'pace'],
+    capturedAt: '2025-01-01T01:02:03.004Z', captureMethod: 'manual'
   });
   workspace = createAsset(workspace, {
     id: 'asset-1', referenceId: 'reference-1', kind: 'video', locator: 's3://asset',
@@ -61,6 +62,10 @@ test('maps every workspace collection and field and round-trips board order', ()
   const rows = workspaceToRows(workspace);
 
   assert.deepEqual(Object.keys(rows), INSERT_ORDER);
+  assert.deepEqual(rows.reference_tags, [
+    { reference_id: 'reference-1', position: 0, tag: 'motion-study' },
+    { reference_id: 'reference-1', position: 1, tag: 'pace' }
+  ]);
   assert.deepEqual(rows.board_selections, [
     { board_id: 'board-1', selection_id: 'selection-2', position: 0 },
     { board_id: 'board-1', selection_id: 'selection-1', position: 1 }
@@ -112,12 +117,14 @@ test('JSONB values are cloned in both mapping directions', () => {
   assert.equal(workspace.assets[0].provenance.nested.source, 'capture');
 });
 
-test('reconstruction sorts entity rows deterministically and board rows by position', () => {
+test('reconstruction sorts entity rows and ordered relational rows deterministically', () => {
   const rows = workspaceToRows(completeWorkspace());
   rows.selections.reverse();
+  rows.reference_tags.reverse();
   rows.board_selections.reverse();
   const workspace = rowsToWorkspace(rows);
   assert.deepEqual(workspace.selections.map(item => item.id), ['selection-1', 'selection-2']);
+  assert.deepEqual(workspace.references[0].tags, ['motion-study', 'pace']);
   assert.deepEqual(workspace.boards[0].selectionIds, ['selection-2', 'selection-1']);
 });
 
@@ -148,6 +155,10 @@ test('rejects missing, duplicate, malformed, and cross-project result rows', () 
   const malformed = workspaceToRows(completeWorkspace());
   malformed.board_selections[1].position = 0;
   assert.throws(() => rowsToWorkspace(malformed), ValidationError);
+
+  const malformedTags = workspaceToRows(completeWorkspace());
+  malformedTags.reference_tags[1].position = 0;
+  assert.throws(() => rowsToWorkspace(malformedTags), ValidationError);
 
   const crossProject = workspaceToRows(completeWorkspace());
   crossProject.projects.push({ ...crossProject.projects[0], id: 'project-2' });

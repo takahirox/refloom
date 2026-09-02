@@ -22,8 +22,11 @@ no third-party packages.
    a URL immediately and queue its initial screenshots by default. The visible
    per-create and shared Workspace controls can opt out before external access,
    and capture never delays or rolls back the URL commit.
-3. Enrich a reference later with title, source URL, creator, notes, additional
-   image assets, and video assets while preserving capture metadata.
+3. Enrich a reference later with title, source URL, creator, notes, canonical
+   tags, additional image assets, and video assets while preserving capture
+   metadata. The Library supports text search over those fields and tags plus an
+   exact-tag filter, with suggestions combining existing Reference tags and a
+   small built-in starter list.
 4. Create a project-scoped selection that keeps Reference, Asset/Target,
    optional Moment, Aspect, and Intent conceptually distinct.
 5. Compose selections into a board and filter or group them by aspect.
@@ -63,8 +66,8 @@ no third-party packages.
   deliverables.
 - Architecture, security/privacy, limitations, and follow-up roadmap are
   documented. Bounded automatic screenshot capture is implemented; richer
-  experience capture, search/recommendation, collaboration, and AI providers
-  are explicitly outside this local-first slice.
+  experience capture, semantic search/recommendation, collaboration, and AI
+  providers are explicitly outside this local-first slice.
 
 ## Product constraints inherited from Issue #1
 

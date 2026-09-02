@@ -8,6 +8,10 @@ import { createPersistenceRepository } from './src/create-persistence-repository
 import { PersistenceError, RevisionConflictError } from './src/persistence-errors.js';
 import { blobIdFromLocator } from './src/storage.js';
 import { normalizeCaptureRequest, publicCaptureResult } from './src/capture-request.js';
+import {
+  MAX_REFERENCE_TAGS, MAX_REFERENCE_TAG_LENGTH, normalizeReferenceTag
+} from './src/reference-tags.js';
+import { listReferenceTagSuggestions } from './src/reference-library.js';
 import { CaptureScheduler } from './src/capture-scheduler.js';
 import { captureReference as defaultCaptureReference } from './src/website-capture-service.js';
 
@@ -22,20 +26,22 @@ const objectSchema = properties => ({ type: 'object', properties, additionalProp
 const string = (description, maxLength = MAX_TEXT) => ({ type: 'string', description, maxLength });
 const required = (schema, ...fields) => ({ ...schema, required: fields });
 const page = { offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT } };
+const referenceTags = { type: 'array', description: 'Ordered reference tags', maxItems: MAX_REFERENCE_TAGS, items: { type: 'string', maxLength: MAX_REFERENCE_TAG_LENGTH } };
 
 const tools = [
   { name: 'list_projects', description: 'List paginated project summaries. Use get_project for detail.', inputSchema: objectSchema(page) },
   { name: 'get_project', description: 'Get one project and counts of its related records.', inputSchema: required(objectSchema({ projectId: string('Project ID', 128) }), 'projectId') },
   { name: 'list_boards', description: 'List paginated board summaries, optionally within a project.', inputSchema: objectSchema({ projectId: string('Project ID', 128), ...page }) },
   { name: 'get_board', description: 'Get a board and its ordered selection summaries.', inputSchema: required(objectSchema({ boardId: string('Board ID', 128) }), 'boardId') },
-  { name: 'search_references', description: 'Search paginated reference summaries by title, creator, URL, or notes.', inputSchema: objectSchema({ projectId: string('Project ID', 128), query: string('Case-insensitive query', MAX_QUERY), ...page }) },
+  { name: 'search_references', description: 'Search paginated reference summaries by title, creator, URL, notes, or tags, with an optional exact tag filter.', inputSchema: objectSchema({ projectId: string('Project ID', 128), query: string('Case-insensitive query', MAX_QUERY), tag: string('Exact reference tag', MAX_REFERENCE_TAG_LENGTH), ...page }) },
+  { name: 'list_reference_tags', description: 'List paginated built-in and workspace reference-tag suggestions, ordered by use then tag.', inputSchema: objectSchema({ projectId: string('Project ID', 128), query: string('Case-insensitive tag query', MAX_QUERY), ...page }) },
   { name: 'get_reference', description: 'Get a reference with paginated registered assets, targets, and moments.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), ...page }), 'referenceId') },
   { name: 'search_selections', description: 'Locate paginated selections by project, aspect, intent, or related reference title.', inputSchema: objectSchema({ projectId: string('Project ID', 128), aspect: string('Case-insensitive aspect filter', MAX_QUERY), query: string('Case-insensitive aspect, intent, or reference-title query', MAX_QUERY), ...page }) },
   { name: 'get_selection', description: 'Get a selection with its target, moment, reference, and asset.', inputSchema: required(objectSchema({ selectionId: string('Selection ID', 128) }), 'selectionId') },
   { name: 'get_creative_direction', description: 'Get versioned creative-direction export for one board, or all boards in one project.', inputSchema: objectSchema({ boardId: string('Board ID', 128), projectId: string('Project ID', 128) }) },
   { name: 'create_project', description: 'Add a project so an empty workspace can be bootstrapped.', inputSchema: required(objectSchema({ title: string('Title'), brief: string('Brief'), expectedRevision: { type: 'integer', minimum: 0 } }), 'title') },
-  { name: 'create_reference', description: 'Add a reference and, for a saved website URL, queue one initial capture by default. Set capture to false to opt out.', inputSchema: required(objectSchema({ projectId: string('Project ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), captureMethod: string('Capture method', 128), capture: { type: 'boolean', description: 'Override the shared default for this creation' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'projectId') },
-  { name: 'enrich_reference', description: 'Add or replace supplied descriptive fields on an existing reference; it never deletes the reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId') },
+  { name: 'create_reference', description: 'Add a reference and, for a saved website URL, queue one initial capture by default. Set capture to false to opt out.', inputSchema: required(objectSchema({ projectId: string('Project ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), tags: referenceTags, captureMethod: string('Capture method', 128), capture: { type: 'boolean', description: 'Override the shared default for this creation' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'projectId') },
+  { name: 'enrich_reference', description: 'Add or replace supplied descriptive fields or ordered tags on an existing reference; it never deletes the reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), title: string('Title'), sourceUrl: string('Source URL'), creator: string('Creator'), notes: string('Notes'), tags: referenceTags, expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId') },
   { name: 'add_asset', description: 'Register a URL asset or add base64 image/video bytes to an existing reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), kind: { type: 'string', enum: ['url', 'image', 'video'] }, locator: string('Absolute http(s) URL for URL assets'), mediaType: string('MIME type', 255), filename: string('Original filename', 1024), data: string('Canonical base64 bytes for image/video assets', 36_000_000), provenance: { type: 'object' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId', 'kind') },
   { name: 'create_target', description: 'Add a precise target to a reference.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128), assetId: string('Asset ID', 128), kind: { type: 'string', enum: ['reference', 'asset', 'region', 'frame', 'interaction'] }, detail: { type: 'object' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'referenceId', 'kind') },
   { name: 'create_moment', description: 'Add a moment to a target.', inputSchema: required(objectSchema({ targetId: string('Target ID', 128), label: string('Label'), start: { type: 'number', minimum: 0 }, end: { type: 'number', minimum: 0 }, state: { type: 'object' }, expectedRevision: { type: 'integer', minimum: 0 } }), 'targetId') },
@@ -59,7 +65,7 @@ const tools = [
   { name: 'get_capture_status', description: 'Get the process-local status of a queued, running, or recent website capture.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128) }), 'referenceId') },
   { name: 'cancel_website_capture', description: 'Cancel a queued or running website capture without deleting its Reference or completed checkpoints.', inputSchema: required(objectSchema({ referenceId: string('Reference ID', 128) }), 'referenceId') }
 ];
-const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'get_reference', 'search_selections', 'get_selection', 'get_creative_direction', 'get_capture_status']);
+const readTools = new Set(['list_projects', 'get_project', 'list_boards', 'get_board', 'search_references', 'list_reference_tags', 'get_reference', 'search_selections', 'get_selection', 'get_creative_direction', 'get_capture_status']);
 for (const tool of tools) tool.annotations = {
   title: tool.name.replaceAll('_', ' '),
   readOnlyHint: readTools.has(tool.name),
@@ -130,14 +136,20 @@ function validateArguments(name, args) {
     const property = schema.properties[field];
     if (!property) fail('INVALID_ARGUMENT', `${field} is not accepted by ${name}`);
     if (property.type === 'string' && typeof value !== 'string') fail('INVALID_ARGUMENT', `${field} must be a string`);
+    if (property.type === 'array' && !Array.isArray(value)) fail('INVALID_ARGUMENT', `${field} must be an array`);
     if (property.type === 'integer' && !Number.isSafeInteger(value)) fail('INVALID_ARGUMENT', `${field} must be an integer`);
     if (property.type === 'number' && !Number.isFinite(value)) fail('INVALID_ARGUMENT', `${field} must be a finite number`);
     if (property.type === 'boolean' && typeof value !== 'boolean') fail('INVALID_ARGUMENT', `${field} must be a boolean`);
     if (property.type === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) fail('INVALID_ARGUMENT', `${field} must be an object`);
     if (property.minimum !== undefined && value < property.minimum) fail('INVALID_ARGUMENT', `${field} is below its minimum`);
     if (property.maximum !== undefined && value > property.maximum) fail('INVALID_ARGUMENT', `${field} exceeds its maximum`);
-    if (property.maxLength !== undefined && value.length > property.maxLength) fail('INVALID_ARGUMENT', `${field} is too long`);
+    if (property.maxLength !== undefined && [...value].length > property.maxLength) fail('INVALID_ARGUMENT', `${field} is too long`);
+    if (property.maxItems !== undefined && value.length > property.maxItems) fail('INVALID_ARGUMENT', `${field} has too many items`);
     if (property.enum && !property.enum.includes(value)) fail('INVALID_ARGUMENT', `${field} has an unsupported value`);
+    if (property.type === 'array') for (const item of value) {
+      if (property.items?.type === 'string' && typeof item !== 'string') fail('INVALID_ARGUMENT', `${field} items must be strings`);
+      if (property.items?.maxLength !== undefined && [...item].length > property.items.maxLength) fail('INVALID_ARGUMENT', `${field} contains an item that is too long`);
+    }
   }
   validateStrings(args);
 }
@@ -249,9 +261,24 @@ export function createMcpServer(options = {}) {
     }
     if (name === 'search_references') {
       const query = (args.query ?? '').toLocaleLowerCase();
-      const matches = workspace.references.filter(item => (!args.projectId || item.projectId === args.projectId) && (!query || [item.title, item.creator, item.sourceUrl, item.notes].some(value => value?.toLocaleLowerCase().includes(query)))).map(({ id, projectId, title, sourceUrl, creator, capturedAt, updatedAt }) => ({ id, projectId, title, sourceUrl, creator, capturedAt, updatedAt }));
+      const tag = args.tag === undefined ? undefined : normalizeReferenceTag(args.tag);
+      const matches = workspace.references
+        .filter(item => (!args.projectId || item.projectId === args.projectId)
+          && (!tag || item.tags.includes(tag))
+          && (!query || [item.title, item.creator, item.sourceUrl, item.notes, ...item.tags]
+            .some(value => value?.toLocaleLowerCase().includes(query))))
+        .map(({ id, projectId, title, sourceUrl, creator, tags, capturedAt, updatedAt }) => ({ id, projectId, title, sourceUrl, creator, tags, capturedAt, updatedAt }));
       const found = paged(matches, args);
       return { revision, references: found.items, total: found.total, offset: found.offset, nextOffset: found.nextOffset };
+    }
+    if (name === 'list_reference_tags') {
+      const query = (args.query ?? '').toLocaleLowerCase();
+      const references = workspace.references
+        .filter(reference => !args.projectId || reference.projectId === args.projectId);
+      const matches = listReferenceTagSuggestions(references)
+        .filter(({ tag }) => !query || tag.toLocaleLowerCase().includes(query));
+      const found = paged(matches, args);
+      return { revision, tags: found.items, total: found.total, offset: found.offset, nextOffset: found.nextOffset };
     }
     if (name === 'get_reference') {
       const reference = entity(workspace, 'references', args.referenceId);
@@ -311,7 +338,7 @@ export function createMcpServer(options = {}) {
       return { ...created, capture: scheduled.outcome };
     }
     if (name === 'enrich_reference') return mutate(args, value => {
-      const changes = Object.fromEntries(['title', 'sourceUrl', 'creator', 'notes'].filter(key => key in args).map(key => [key, args[key]]));
+      const changes = Object.fromEntries(['title', 'sourceUrl', 'creator', 'notes', 'tags'].filter(key => key in args).map(key => [key, args[key]]));
       if (!Object.keys(changes).length) fail('INVALID_ARGUMENT', 'At least one enrichment field is required');
       const next = updateReference(value, args.referenceId, changes);
       return { workspace: next, entity: saved => entity(saved, 'references', args.referenceId) };

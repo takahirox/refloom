@@ -25,6 +25,10 @@ evidence, interpretation, and intent into one object. Its core vocabulary is:
   expresses a context-specific intended use. Refloom must not present inferred
   taste or preference as fact.
 
+Reference tags are optional and non-exclusive. They describe the Reference and
+its broad usefulness, and remain distinct from the project-specific Aspect and
+Intent recorded by a Selection.
+
 Selections bind a source-linked Target and optional Moment to an Aspect and
 intent. Selections, Boards, Signals, and Decisions remain project- or
 context-specific even when their Reference is reusable.

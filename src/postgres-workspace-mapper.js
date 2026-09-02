@@ -1,8 +1,9 @@
-import { importWorkspace, ValidationError } from './domain.js';
+import { importWorkspace, ValidationError, WORKSPACE_VERSION } from './domain.js';
 
 export const INSERT_ORDER = Object.freeze([
   'projects',
   'references',
+  'reference_tags',
   'assets',
   'targets',
   'moments',
@@ -48,6 +49,9 @@ export function workspaceToRows(workspace) {
       notes: entity.notes ?? null, captured_at: timestamp(entity.capturedAt, 'capturedAt'),
       capture_method: entity.captureMethod, ...stampsToRow(entity)
     })),
+    reference_tags: value.references.flatMap(reference => reference.tags.map((tag, position) => ({
+      reference_id: reference.id, position, tag
+    }))),
     assets: value.assets.map(entity => ({
       id: entity.id, project_id: entity.projectId, reference_id: entity.referenceId,
       kind: entity.kind, locator: entity.locator, media_type: entity.mediaType ?? null,
@@ -136,21 +140,69 @@ function boardSelectionMap(rowSets, boardIds) {
   return byBoard;
 }
 
+function referenceTagMap(rowSets, referenceIds) {
+  const issues = [];
+  const byReference = new Map(referenceIds.map(id => [id, []]));
+  const positions = new Set();
+  const tags = new Set();
+  for (const [index, row] of rowSets.reference_tags.entries()) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      issues.push({ path: `reference_tags[${index}]`, message: 'must be an object' });
+      continue;
+    }
+    if (!byReference.has(row.reference_id)) {
+      issues.push({ path: `reference_tags[${index}].reference_id`, message: 'references missing reference row' });
+      continue;
+    }
+    if (!Number.isInteger(row.position) || row.position < 0) {
+      issues.push({ path: `reference_tags[${index}].position`, message: 'must be a non-negative integer' });
+      continue;
+    }
+    if (typeof row.tag !== 'string') {
+      issues.push({ path: `reference_tags[${index}].tag`, message: 'must be a string' });
+      continue;
+    }
+    const positionKey = `${row.reference_id}\u0000${row.position}`;
+    const tagKey = `${row.reference_id}\u0000${row.tag}`;
+    if (positions.has(positionKey)) {
+      issues.push({ path: `reference_tags[${index}].position`, message: 'must be unique within reference' });
+    }
+    if (tags.has(tagKey)) {
+      issues.push({ path: `reference_tags[${index}].tag`, message: 'must be unique within reference' });
+    }
+    positions.add(positionKey);
+    tags.add(tagKey);
+    byReference.get(row.reference_id).push(row);
+  }
+  for (const [referenceId, rows] of byReference) {
+    rows.sort((left, right) => left.position - right.position || left.tag.localeCompare(right.tag));
+    rows.forEach((row, index) => {
+      if (row.position !== index) {
+        issues.push({ path: `reference_tags.${referenceId}`, message: 'positions must be contiguous from zero' });
+      }
+    });
+  }
+  if (issues.length) throw new ValidationError(issues);
+  return byReference;
+}
+
 export function rowsToWorkspace(rowSets, settings = { automaticWebsiteCapture: true }) {
   requireRowSets(rowSets);
+  const referenceRows = stableRows(rowSets.references);
+  const referenceTags = referenceTagMap(rowSets, referenceRows.map(row => row?.id));
   const boardRows = stableRows(rowSets.boards);
   const boardSelections = boardSelectionMap(rowSets, boardRows.map(row => row?.id));
   const workspace = {
-    version: 1,
+    version: WORKSPACE_VERSION,
     settings: clone(settings),
     projects: stableRows(rowSets.projects).map(row => ({
       id: row.id, title: row.title, ...present('brief', optional(row.brief)), ...stampsFromRow(row)
     })),
-    references: stableRows(rowSets.references).map(row => ({
+    references: referenceRows.map(row => ({
       id: row.id, projectId: row.project_id, ...present('title', optional(row.title)),
       ...present('sourceUrl', optional(row.source_url)), ...present('creator', optional(row.creator)),
-      ...present('notes', optional(row.notes)), capturedAt: timestamp(row.captured_at, 'captured_at'),
-      captureMethod: row.capture_method, ...stampsFromRow(row)
+      ...present('notes', optional(row.notes)), tags: referenceTags.get(row.id).map(item => item.tag),
+      capturedAt: timestamp(row.captured_at, 'captured_at'), captureMethod: row.capture_method, ...stampsFromRow(row)
     })),
     assets: stableRows(rowSets.assets).map(row => ({
       id: row.id, projectId: row.project_id, referenceId: row.reference_id,
@@ -195,6 +247,7 @@ const specification = (text, fields) => Object.freeze({
 export const INSERT_SPECIFICATIONS = Object.freeze({
   projects: specification('insert into projects (id, title, brief, created_at, updated_at) values ($1, $2, $3, $4, $5)', ['id', 'title', 'brief', 'created_at', 'updated_at']),
   references: specification('insert into "references" (id, project_id, title, source_url, creator, notes, captured_at, capture_method, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)', ['id', 'project_id', 'title', 'source_url', 'creator', 'notes', 'captured_at', 'capture_method', 'created_at', 'updated_at']),
+  reference_tags: specification('insert into reference_tags (reference_id, position, tag) values ($1, $2, $3)', ['reference_id', 'position', 'tag']),
   assets: specification('insert into assets (id, project_id, reference_id, kind, locator, media_type, captured_at, provenance, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)', ['id', 'project_id', 'reference_id', 'kind', 'locator', 'media_type', 'captured_at', 'provenance', 'created_at', 'updated_at']),
   targets: specification('insert into targets (id, project_id, reference_id, asset_id, kind, detail, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8)', ['id', 'project_id', 'reference_id', 'asset_id', 'kind', 'detail', 'created_at', 'updated_at']),
   moments: specification('insert into moments (id, project_id, target_id, label, start_value, end_value, state, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)', ['id', 'project_id', 'target_id', 'label', 'start_value', 'end_value', 'state', 'created_at', 'updated_at']),

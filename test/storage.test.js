@@ -61,12 +61,13 @@ test('backup decoder rejects unsupported envelopes and workspace errors', () => 
   assert.throws(() => decodeBackup('{'), /valid JSON/i);
   assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 99, workspace, binaries: [] })), /unsupported/i);
   assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 1, workspace, binaries: [zero] })), /version/i);
-  assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 2, workspace: { version: 999 }, binaries: [zero] })), /validation/i);
+  assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 2, workspace, binaries: [zero] })), /version/i);
+  assert.throws(() => decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: BACKUP_VERSION, workspace: { version: 999 }, binaries: [zero] })), /validation/i);
 });
 
 test('backup decoder validates exact records, correspondence, size, and digest', () => {
   const workspace = workspaceWithBlob();
-  const envelope = binaries => JSON.stringify({ format: BACKUP_FORMAT, version: 2, workspace, binaries });
+  const envelope = binaries => JSON.stringify({ format: BACKUP_FORMAT, version: BACKUP_VERSION, workspace, binaries });
   assert.throws(() => decodeBackup(envelope([])), /missing/i);
   assert.throws(() => decodeBackup(envelope([zero, zero])), /duplicated/i);
   assert.throws(() => decodeBackup(envelope([zero, { ...zero, id: 'orphan' }])), /orphaned/i);
@@ -87,7 +88,7 @@ test('backup decoder returns sorted cloned data', () => {
   let workspace = workspaceWithBlob();
   workspace = createAsset(workspace, { id: 'asset-2', referenceId: 'reference-1', kind: 'image', locator: 'blob:binary-0' });
   const other = { ...zero, id: 'binary-0' };
-  const backup = decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: 2, workspace, binaries: [zero, other] }));
+  const backup = decodeBackup(JSON.stringify({ format: BACKUP_FORMAT, version: BACKUP_VERSION, workspace, binaries: [zero, other] }));
   assert.deepEqual(backup.binaries.map(item => item.id), ['binary-0', 'binary-1']);
   backup.workspace.projects[0].title = 'mutated';
   backup.binaries[0].name = 'mutated';
@@ -150,13 +151,13 @@ test('WorkspaceRepository preserves backup endpoints and reset behavior', async 
   const calls = [];
   const repository = new WorkspaceRepository(async (path, options = {}) => {
     calls.push({ path, options });
-    if (path === '/api/backup' && !options.method) return new Response('backup-v2');
+    if (path === '/api/backup' && !options.method) return new Response('backup-v3');
     if (path === '/api/backup') return new Response(JSON.stringify({ revision: 'restored', workspace }), { headers: { 'Content-Type': 'application/json' } });
     return new Response(JSON.stringify({ revision: 'reset' }), { headers: { 'Content-Type': 'application/json' } });
   });
 
   repository.revision = 'before';
-  assert.equal(await repository.exportBackup(), 'backup-v2');
+  assert.equal(await repository.exportBackup(), 'backup-v3');
   assert.deepEqual(await repository.importBackup(JSON.stringify({ format: BACKUP_FORMAT, version: BACKUP_VERSION })), workspace);
   assert.deepEqual(await repository.reset(), empty);
   assert.equal(calls[0].path, '/api/backup');

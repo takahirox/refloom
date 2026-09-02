@@ -130,9 +130,12 @@ test('failed SQL rolls back without recording the migration and still cleans up'
 test('the committed migration defines all normalized tables and required constraints', async () => {
   const sql = await readFile(new URL('../migrations/0001_persistence.sql', import.meta.url), 'utf8');
   for (const table of [
-    'workspace_state', 'projects', 'references', 'assets', 'targets', 'moments',
+    'workspace_state', 'projects', 'references', 'reference_tags', 'assets', 'targets', 'moments',
     'selections', 'boards', 'board_selections', 'signals', 'media_objects'
   ]) assert.match(sql, new RegExp(`create table ${table === 'references' ? '"references"' : table} \\(`));
+  assert.match(sql, /reference_id text not null references "references"\(id\) on delete cascade/);
+  assert.match(sql, /primary key \(reference_id, position\)/);
+  assert.match(sql, /unique \(reference_id, tag\)/);
   assert.match(sql, /foreign key \(reference_id, project_id\) references "references"\(id, project_id\)/);
   assert.match(sql, /foreign key \(asset_id, reference_id\) references assets\(id, reference_id\)/);
   assert.match(sql, /foreign key \(moment_id, target_id\) references moments\(id, target_id\)/);

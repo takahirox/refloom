@@ -26,6 +26,7 @@ const required = [
   'mcp-server.mjs',
   'src/app.js',
   'src/domain.js',
+  'src/reference-tags.js',
   'src/create-persistence-repository.js',
   'src/persistence-config.js',
   'src/persistence-errors.js',

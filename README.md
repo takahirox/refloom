@@ -94,15 +94,24 @@ codex mcp add refloom --env DATABASE_URL=postgresql://... --env REFLOOM_S3_ENDPO
 
 Read tools progressively disclose project and board summaries before paginated
 reference/selection search, exact reference/selection detail, and creative
-direction. To bootstrap an empty workspace, call the additive-only
-`create_project` tool with a required `title`, an optional `brief`, and an
-optional `expectedRevision`; it returns the committed `revision` and created
-Project entity. Other write tools only append references, assets, targets,
-moments, selections, or board membership, or enrich descriptive reference
-fields. There are no update/delete Project tools or delete, remove, reset,
-import, reorder, or arbitrary workspace-write tools. Supply `expectedRevision`
-when coordinating multiple agents; stale mutations return `REVISION_CONFLICT`
-instead of overwriting newer state.
+direction. Reference search matches title, creator, URL, notes, and tags; its
+optional `tag` filter is an exact canonical-tag match. The paginated
+`list_reference_tags` tool provides bounded suggestions from a small built-in
+starter list and current workspace References, optionally scoped by project or
+substring. Used tags are ordered by Reference count then tag, followed by
+unused built-ins.
+
+To bootstrap an empty workspace, call the additive-only `create_project` tool
+with a required `title`, an optional `brief`, and an optional
+`expectedRevision`; it returns the committed `revision` and created Project
+entity. `create_reference` and `enrich_reference` accept an optional ordered
+`tags` array and return its canonical normalized values. Other write tools only
+append references, assets, targets, moments, selections, or board membership,
+or enrich descriptive reference fields and tags. There are no update/delete
+Project tools or delete, remove, reset, import, reorder, or arbitrary
+workspace-write tools. Supply `expectedRevision` when coordinating multiple
+agents; stale mutations return `REVISION_CONFLICT` instead of overwriting newer
+state.
 The `request_website_capture` tool is an explicitly open-world, non-destructive
 action: it accepts an existing Reference ID and bounded capture settings, then
 uses only that Reference's stored source URL.
@@ -130,18 +139,22 @@ rendering constraints.
 ## End-to-end workflow
 
 1. Create a project and optional brief.
-2. Capture an image by picker, drop, or clipboard, or save a URL immediately.
+2. Capture an image by picker, drop, or clipboard, or save a URL immediately;
+   optional URL tags become chips when entered with comma or Enter.
 3. A newly saved website URL queues bounded initial/scroll screenshots by
    default. Disable the visible per-create control or shared Workspace default
    to save without external access. The URL remains saved if capture is
    cancelled, Chrome is unavailable, or a later checkpoint fails.
-4. Enrich the reference later with provenance, notes, and more image or video
-   assets.
-5. Select an exact reference target or moment, name the relevant aspect, and
+4. Enrich the reference later with provenance, notes, tags, and more image or
+   video assets. Tag suggestions combine tags already used by References with
+   the built-in starter list.
+5. Search the Library across title, creator, URL, notes, and tags, or combine it
+   with the exact-tag filter.
+6. Select an exact reference target or moment, name the relevant aspect, and
    state the intended use.
-6. Compose and arrange selections on the project board; filter by aspect.
-7. Download the board as Markdown or `refloom.creative-direction` JSON.
-8. Review factual capture, enrichment, selection, board, and export activity.
+7. Compose and arrange selections on the project board; filter by aspect.
+8. Download the board as Markdown or `refloom.creative-direction` JSON.
+9. Review factual capture, enrichment, selection, board, and export activity.
 
 Project and reference deletion and the full reset action require confirmation.
 
@@ -152,10 +165,10 @@ is the sole captured-media authority. Browser, HTTP, MCP, and capture coordinate
 through the same global revision. The browser stores no authoritative data;
 `localStorage` retains only the selected project ID.
 
-There is no reader or automatic migration for old browser/file persistence.
-Before upgrading, export a version-2 backup from a supported pre-cutover build,
-or start with an empty database. Backup version 1 and raw workspace files are
-rejected.
+This breaking cutover has no database or backup upgrade path. Reset or recreate
+the PostgreSQL database before starting this build. Backup versions 1 and 2, raw
+workspace files, and other pre-cutover persistence are rejected rather than
+migrated.
 
 Download workspace backups regularly. A backup contains the complete workspace,
 provenance, source URLs, notes, and base64-encoded captured media, so treat it as
@@ -171,13 +184,13 @@ method needed to reproduce them.
 
 ## 0.1 scope
 
-Included: project/reference capture and enrichment, controlled automatic
-website screenshot checkpoints, precise selections, boards, factual activity
-signals, Markdown/JSON direction export, validated backup/import, cascade
-deletion, and local reset.
+Included: project/reference capture and enrichment, canonical Reference tags,
+Library text and exact-tag filtering, controlled automatic website screenshot
+checkpoints, precise selections, boards, factual activity signals, Markdown/JSON
+direction export, validated backup/import, cascade deletion, and local reset.
 
 Not included: video/hover/click/drag capture, semantic transition detection,
-search or recommendations, persistent personal/team contexts, collaboration,
+semantic search or recommendations, persistent personal/team contexts, collaboration,
 hosted sync, AI providers, or legal/copyright policy automation. See
 [docs/ROADMAP.md](docs/ROADMAP.md).
 

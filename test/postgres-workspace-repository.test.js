@@ -7,13 +7,15 @@ import { workspaceToRows } from '../src/postgres-workspace-mapper.js';
 import { encodeBackup } from '../src/storage.js';
 
 const emptyRows = () => ({
-  projects: [], references: [], assets: [], targets: [], moments: [], selections: [],
-  boards: [], board_selections: [], signals: []
+  projects: [], references: [], reference_tags: [], assets: [], targets: [], moments: [],
+  selections: [], boards: [], board_selections: [], signals: []
 });
 
 function workspaceWithBlob(id = 'blob_1') {
   let value = createProject(createWorkspace(), { id: 'p', title: 'Project' });
-  value = createReference(value, { id: 'r', projectId: 'p', captureMethod: 'manual' });
+  value = createReference(value, {
+    id: 'r', projectId: 'p', captureMethod: 'manual', tags: ['Beta', 'alpha']
+  });
   return createAsset(value, {
     id: 'a', referenceId: 'r', kind: 'image', locator: `blob:${id}`,
     mediaType: 'text/plain'
@@ -89,9 +91,11 @@ test('load reconstructs all fixed row sets and preserves board position query', 
   assert.equal(result.revision, 2);
   assert.deepEqual(result.workspace, createWorkspace());
   const selects = pool.queries.filter(item => item.text.startsWith('select *'));
-  assert.equal(selects.length, 9);
+  assert.equal(selects.length, 10);
   assert.ok(selects.every(item => item.values === undefined));
-  assert.equal(selects[7].text,
+  assert.equal(selects[2].text,
+    'select * from reference_tags order by reference_id, position');
+  assert.equal(selects[8].text,
     'select * from board_selections order by board_id, position');
   assert.equal(pool.queries[0].text, 'begin isolation level repeatable read read only');
   assert.equal(pool.queries.at(-1).text, 'commit');
@@ -256,7 +260,7 @@ test('cleanup passes exactly current media_objects IDs', async () => {
   assert.deepEqual([...options.referencedIds], ['keep-a', 'keep-b']);
 });
 
-test('backup export captures one snapshot then fetches verified objects as backup v2', async () => {
+test('backup export captures one snapshot then fetches verified objects as backup v3', async () => {
   const workspace = workspaceWithBlob();
   const events = [];
   const pool = new FakePool((text, values, client) => {
@@ -271,6 +275,10 @@ test('backup export captures one snapshot then fetches verified objects as backu
       captured_at: workspace.references[0].capturedAt, capture_method: 'manual',
       created_at: workspace.references[0].createdAt, updated_at: workspace.references[0].updatedAt
     }] };
+    if (text.startsWith('select * from reference_tags')) return { rows: [
+      { reference_id: 'r', position: 0, tag: 'beta' },
+      { reference_id: 'r', position: 1, tag: 'alpha' }
+    ] };
     if (text.startsWith('select * from assets')) return { rows: [{
       id: 'a', project_id: 'p', reference_id: 'r', kind: 'image', locator: 'blob:blob_1',
       media_type: 'text/plain', captured_at: workspace.assets[0].capturedAt, provenance: {},
@@ -291,7 +299,8 @@ test('backup export captures one snapshot then fetches verified objects as backu
   };
   const repository = new PostgresWorkspaceRepository({ pool, mediaStore });
   const backup = JSON.parse(await repository.exportBackup());
-  assert.equal(backup.version, 2);
+  assert.equal(backup.version, 3);
+  assert.deepEqual(backup.workspace.references[0].tags, ['beta', 'alpha']);
   assert.equal(backup.binaries[0].data, 'aGVsbG8=');
   assert.equal(backup.binaries[0].type, 'text/plain');
   assert.equal(backup.binaries[0].name, 'hello.txt');
@@ -354,7 +363,7 @@ test('backup export propagates verified S3 failure after committing snapshot', a
   assert.equal(pool.released, true);
 });
 
-test('backup import fully decodes v2 before invoking commit', async () => {
+test('backup import fully decodes v3 and rejects v2 before invoking commit', async () => {
   const workspace = workspaceWithBlob();
   const repository = new PostgresWorkspaceRepository({
     pool: new FakePool(() => ({ rows: [] })), mediaStore: new FakeMediaStore()
@@ -375,7 +384,7 @@ test('backup import fully decodes v2 before invoking commit', async () => {
       && /valid JSON/.test(error.cause?.message));
   assert.equal(committed, undefined);
   await assert.rejects(repository.importBackup(3, JSON.stringify({
-    format: 'refloom.workspace-backup', version: 1,
+    format: 'refloom.workspace-backup', version: 2,
     workspace, binaries: []
   })), error => error instanceof PersistenceError
     && /backup import failed/.test(error.message) && /version/.test(error.cause?.message));
