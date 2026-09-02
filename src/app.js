@@ -320,6 +320,7 @@ function websiteCaptureEditor(reference, control) {
     element('option', { value: 'mobile', text: 'Mobile · 390 × 844' })
   ]);
   const mode = element('select', { id: 'field-capture-mode', name: 'mode' }, [
+    element('option', { value: 'interactive-auto', text: 'Interactive Auto · Passive WebGL' }),
     element('option', { value: 'viewport', text: 'Initial viewport' }),
     element('option', { value: 'full-page', text: 'Full page' }),
     element('option', { value: 'section', text: 'First main section' }),
@@ -328,10 +329,15 @@ function websiteCaptureEditor(reference, control) {
   openEditor('Capture website', [
     element('div', { className: 'field' }, [element('label', { for: 'field-capture-preset', text: 'Responsive preset' }), preset]),
     element('div', { className: 'field' }, [element('label', { for: 'field-capture-mode', text: 'Capture mode' }), mode]),
-    element('p', { className: 'hint', text: 'Capture stores still images only and does not click, type, hover, or record video.' })
+    element('p', { className: 'hint', text: 'Interactive Auto passively observes visible WebGL activity for a bounded period. It never clicks, types, points, submits forms, opens wallets or permissions, uploads, purchases, or navigates.' })
   ], data => captureWebsite(reference.id, {
     preset: data.get('preset'), mode: data.get('mode'), readinessMs: 1000,
-    settleMs: 500, maxRedirects: 10
+    settleMs: 500, maxRedirects: 10,
+    ...(data.get('mode') === 'interactive-auto' ? {
+      interactionMode: 'passive', observationMs: 10_000,
+      sampleIntervalMs: 500, representativeMoments: 4,
+      stabilitySamples: 3, stabilityThreshold: 0.015
+    } : {})
   }, control));
 }
 

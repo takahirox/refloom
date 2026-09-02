@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { createAsset, createMoment, createTarget } from './domain.js';
 import { RevisionConflictError } from './persistence-errors.js';
 import {
   captureDiagnosticCode, captureWebsite, validateCaptureSettings
 } from './chrome-capture.js';
 import { normalizeCaptureUrl } from './capture-url.js';
+import { blobIdFromLocator } from './storage.js';
 
 const activeStores = new WeakMap();
 const ERROR = Object.freeze({
@@ -43,11 +45,22 @@ function appendCheckpoint(workspace, referenceId, screenshot, entityIds, reuseAs
     mode: screenshot.mode,
     captureMethod: screenshot.captureMethod,
     captureStrategy: screenshot.captureStrategy,
+    screenshotSha256: screenshot.screenshotSha256,
     checkpointIndex: screenshot.checkpoint.index,
     checkpointY: screenshot.checkpoint.y,
     checkpointCount: screenshot.checkpoint.count,
     region: screenshot.region,
-    scroll: screenshot.scroll
+    scroll: screenshot.scroll,
+    ...(screenshot.devicePixelRatio === undefined ? {} : { devicePixelRatio: screenshot.devicePixelRatio }),
+    ...(screenshot.targetCanvas === undefined ? {} : { targetCanvas: screenshot.targetCanvas }),
+    ...(screenshot.relativeTimestampMs === undefined ? {} : { relativeTimestampMs: screenshot.relativeTimestampMs }),
+    ...(screenshot.stabilityCriteria === undefined ? {} : { stabilityCriteria: screenshot.stabilityCriteria }),
+    ...(screenshot.selectionReason === undefined ? {} : { selectionReason: screenshot.selectionReason }),
+    ...(screenshot.selectionScore === undefined ? {} : { selectionScore: screenshot.selectionScore }),
+    ...(screenshot.warnings === undefined ? {} : { warnings: screenshot.warnings }),
+    ...(screenshot.blockedActions === undefined ? {} : { blockedActions: screenshot.blockedActions }),
+    ...(screenshot.completionStatus === undefined ? {} : { completionStatus: screenshot.completionStatus }),
+    ...(screenshot.automation === undefined ? {} : { automation: screenshot.automation })
   };
   let next = workspace;
   if (!reuseAsset) {
@@ -87,11 +100,22 @@ export async function captureReference(store, referenceId, settings = {}, depend
   if (activeReferences.has(referenceId)) return failed(ERROR.BUSY);
   activeReferences.add(referenceId);
   const captured = [];
-  const assetsByPng = new Map();
+  const assetsByDigest = new Map();
   try {
     const initial = await store.load();
     const reference = initial.workspace.references.find(item => item.id === referenceId);
     if (!reference?.sourceUrl) return failed(ERROR.INVALID_REFERENCE);
+    for (const asset of initial.workspace.assets) {
+      if (asset.referenceId !== referenceId ||
+          typeof asset.provenance?.screenshotSha256 !== 'string') continue;
+      const mediaId = blobIdFromLocator(asset.locator);
+      if (mediaId) {
+        assetsByDigest.set(asset.provenance.screenshotSha256, {
+          assetId: asset.id,
+          mediaId
+        });
+      }
+    }
 
     let source;
     try { validateCaptureSettings(settings); }
@@ -107,8 +131,11 @@ export async function captureReference(store, referenceId, settings = {}, depend
       ...(dependencies.captureOptions || {}),
       ...(dependencies.signal ? { signal: dependencies.signal } : {}),
       onScreenshot: async screenshot => {
+        const screenshotSha256 = createHash('sha256')
+          .update(Buffer.from(screenshot.png, 'base64')).digest('hex');
+        const checkpoint = { ...screenshot, screenshotSha256 };
         const generatedIds = ids(randomUUID);
-        const reused = assetsByPng.get(screenshot.png);
+        const reused = assetsByDigest.get(screenshotSha256);
         const entityIds = reused ? {
           ...generatedIds,
           mediaId: reused.mediaId,
@@ -117,16 +144,21 @@ export async function captureReference(store, referenceId, settings = {}, depend
         for (let attempt = 0; ; attempt += 1) {
           const current = await store.load();
           if (!current.workspace.references.some(item => item.id === referenceId)) throw new Error(ERROR.FAILED);
-          const next = appendCheckpoint(current.workspace, referenceId, screenshot, entityIds, Boolean(reused));
+          const reusable = Boolean(
+            reused && current.workspace.assets.some(item => item.id === reused.assetId)
+          );
+          const next = appendCheckpoint(
+            current.workspace, referenceId, checkpoint, entityIds, reusable
+          );
           try {
-            const additions = reused ? [] : [{
+            const additions = reusable ? [] : [{
               id: entityIds.mediaId,
               data: screenshot.png,
               type: 'image/png',
               name: `${entityIds.mediaId}.png`
             }];
             await store.commit(current.revision, next, additions);
-            if (!reused) assetsByPng.set(screenshot.png, entityIds);
+            if (!reusable) assetsByDigest.set(screenshotSha256, entityIds);
             captured.push(entityIds);
             return;
           } catch (error) {
@@ -135,7 +167,13 @@ export async function captureReference(store, referenceId, settings = {}, depend
         }
       }
     });
-    return { status: 'complete', captured, summary };
+    const completion = summary?.autoCapture?.completionStatus;
+    return {
+      status: completion === 'partial' ? 'partial' : 'complete',
+      captured,
+      summary,
+      ...(completion === 'partial' ? { error: ERROR.FAILED } : {})
+    };
   } catch (error) {
     if (dependencies.signal?.aborted) {
       return { status: 'cancelled', captured, error: ERROR.CANCELLED };

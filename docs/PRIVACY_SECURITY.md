@@ -90,6 +90,15 @@ session-leakage, display exposure, and resource-exhaustion risk; they are not a
 claim of perfect browser sandboxing. The complete boundary is in
 `WEBSITE_CAPTURE.md`.
 
+Interactive Auto capture is passive-only. It instruments WebGL/WebGL2 context
+creation and rendering calls, observes visible canvases, and captures bounded
+still frames. It has no input-action executor and never synthesizes clicks,
+keyboard or pointer events, forms, wallets, permissions, uploads, purchases, or
+navigation actions. Forward-compatible guided/explore action types are data
+schema only and are rejected by current validation. Observation time, sample
+count, candidate bytes, screenshot size, and the overall browser operation all
+have hard limits; cancellation preserves useful committed partial results.
+
 ## Persistent data and provenance
 
 The authoritative workspace is stored in PostgreSQL and media in the configured

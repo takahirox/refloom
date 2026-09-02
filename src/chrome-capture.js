@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { CAPTURE_ERROR, normalizeCaptureUrl } from './capture-url.js';
 import { createCaptureProxy } from './capture-proxy.js';
+import {
+  PAGE_RUNTIME_DIAGNOSTIC_EXPRESSION, PAGE_WEBGL_RUNTIME_HOOK,
+  observeInteractiveAuto, validateInteractiveAutoSettings
+} from './interactive-auto.js';
 
 const KNOWN_CHROME = process.platform === 'darwin'
   ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium']
@@ -53,29 +57,6 @@ const WEBGL_CAPABILITY_EXPRESSION = `(() => {
   const canvas = document.createElement('canvas');
   return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl'));
 })()`;
-
-const PAGE_RUNTIME_HOOK = `(() => {
-  const state = { webGlContextFailure: false };
-  Object.defineProperty(globalThis, Symbol.for('refloom.pageRuntimeDiagnostic'), {
-    value: state
-  });
-  const original = HTMLCanvasElement.prototype.getContext;
-  HTMLCanvasElement.prototype.getContext = function(type, ...args) {
-    const isWebGl = type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl';
-    try {
-      const context = Reflect.apply(original, this, [type, ...args]);
-      if (isWebGl && context === null) state.webGlContextFailure = true;
-      return context;
-    } catch (error) {
-      if (isWebGl) state.webGlContextFailure = true;
-      throw error;
-    }
-  };
-})()`;
-
-const PAGE_RUNTIME_DIAGNOSTIC_EXPRESSION = `Boolean(
-  globalThis[Symbol.for('refloom.pageRuntimeDiagnostic')]?.webGlContextFailure
-)`;
 
 async function verifyWebGlCapability(cdp, clock, timeoutMs) {
   try {
@@ -237,7 +218,9 @@ export const CAPTURE_PRESETS = Object.freeze({
   tablet: Object.freeze({ width: 1024, height: 768 }),
   mobile: Object.freeze({ width: 390, height: 844 })
 });
-export const CAPTURE_MODES = Object.freeze(['scroll', 'viewport', 'full-page', 'section', 'hero']);
+export const CAPTURE_MODES = Object.freeze([
+  'scroll', 'viewport', 'full-page', 'section', 'hero', 'interactive-auto'
+]);
 
 export function validateCaptureSettings(options = {}) {
   const suppliedPreset = options.preset;
@@ -268,6 +251,17 @@ export function validateCaptureSettings(options = {}) {
     mode,
     ...(selector === undefined ? {} : { selector: selector.trim() })
   };
+  const autoKeys = [
+    'interactionMode', 'observationMs', 'sampleIntervalMs',
+    'representativeMoments', 'stabilitySamples', 'stabilityThreshold'
+  ];
+  if (mode !== 'interactive-auto' && autoKeys.some(key => options[key] !== undefined)) {
+    throw new Error(CAPTURE_ERROR);
+  }
+  if (mode === 'interactive-auto') {
+    try { Object.assign(values, validateInteractiveAutoSettings(options)); }
+    catch { throw new Error(CAPTURE_ERROR); }
+  }
   const numeric = ['settleMs', 'readinessMs', 'checkpoints', 'width', 'height', 'maxRedirects'];
   if (!numeric.every(key => Number.isSafeInteger(values[key])) ||
       values.settleMs < 0 || values.settleMs > 2_000 ||
@@ -349,7 +343,7 @@ export async function captureWebsite(input, options = {}) {
     active();
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
-    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: PAGE_RUNTIME_HOOK });
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: PAGE_WEBGL_RUNTIME_HOOK });
     await verifyWebGlCapability(cdp, clock, checkpointMs);
     await cdp.send('Target.setDiscoverTargets', { discover: true });
     await cdp.send('Browser.setDownloadBehavior', { behavior: 'deny' });
@@ -400,12 +394,73 @@ export async function captureWebsite(input, options = {}) {
       width: Math.min(document.documentElement.scrollWidth, 16384),
       height: Math.min(document.documentElement.scrollHeight, 100000),
       viewportWidth: innerWidth,
-      viewportHeight: innerHeight
+      viewportHeight: innerHeight,
+      devicePixelRatio
     })`);
     if (!metrics || typeof metrics.url !== 'string' || typeof metrics.title !== 'string' ||
         ![metrics.width, metrics.height, metrics.viewportWidth, metrics.viewportHeight].every(value => Number.isFinite(value) && value > 0)) throw new Error(CAPTURE_ERROR);
     const final = await normalizeCaptureUrl(metrics.url, { resolver: options.resolver, policy: options.urlPolicy });
     const capturedAt = options.now?.() || new Date().toISOString();
+    if (mode === 'interactive-auto') {
+      const observed = await observeInteractiveAuto(cdp, {
+        ...settings,
+        active,
+        signal: options.signal,
+        checkpointMs,
+        maxScreenshotBytes,
+        maxObservationBytes: options.maxObservationBytes ?? 50 * 1024 * 1024,
+        pause: ms => pause(clock, ms),
+        bounded: (promise, timeout) => bounded(promise, clock, timeout)
+      });
+      for (const selected of observed.screenshots) {
+        active();
+        const screenshotCapturedAt = new Date(
+          Date.parse(capturedAt) + selected.relativeTimestampMs
+        ).toISOString();
+        await options.onScreenshot?.({
+          png: selected.png,
+          y: 0,
+          sourceUrl: target.href,
+          originalUrl: target.href,
+          finalUrl: final.href,
+          title: metrics.title,
+          domain: final.hostname,
+          viewport: { width, height, deviceScaleFactor: metrics.devicePixelRatio },
+          devicePixelRatio: metrics.devicePixelRatio,
+          preset,
+          mode,
+          region: selected.targetCanvas.bounds,
+          scroll: { x: 0, y: 0 },
+          checkpoint: selected.checkpoint,
+          capturedAt: screenshotCapturedAt,
+          captureMethod: 'automated-browser',
+          captureStrategy: 'passive-webgl-observation',
+          targetCanvas: selected.targetCanvas,
+          relativeTimestampMs: selected.relativeTimestampMs,
+          stabilityCriteria: selected.stabilityCriteria,
+          selectionReason: selected.selectionReason,
+          selectionScore: selected.selectionScore,
+          warnings: selected.warnings,
+          blockedActions: selected.blockedActions,
+          automation: selected.automation,
+          completionStatus: selected.completionStatus
+        });
+      }
+      return {
+        ...metrics,
+        sourceUrl: target.href,
+        originalUrl: target.href,
+        finalUrl: final.href,
+        hostname: final.hostname,
+        viewport: { width, height, deviceScaleFactor: metrics.devicePixelRatio },
+        preset,
+        mode,
+        screenshots: observed.screenshots.map(item => ({ y: 0, png: item.png })),
+        capturedAt,
+        networkBytes: proxy.stats?.().usedBytes,
+        autoCapture: observed.autoCapture
+      };
+    }
     const strategy = {
       scroll: 'deterministic-scroll', viewport: 'viewport', 'full-page': 'full-page',
       section: 'deterministic-section', hero: 'deterministic-hero'

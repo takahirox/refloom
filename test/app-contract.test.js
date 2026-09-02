@@ -55,7 +55,7 @@ test('UI refresh preserves form names, file inputs, and dialog forms', async () 
   const [html, source] = await Promise.all([read('public/index.html'), read('src/app.js')]);
   const form = html.slice(html.indexOf('<form id="url-form"'), html.indexOf('</form>'));
   for (const name of ['url', 'captureWebsite']) assert.match(form, new RegExp(`name="${name}"`), `missing field ${name}`);
-  for (const value of ['desktop', 'tablet', 'mobile', 'viewport', 'full-page', 'section', 'hero']) assert.match(source, new RegExp(`value: '${value}'`));
+  for (const value of ['desktop', 'tablet', 'mobile', 'interactive-auto', 'viewport', 'full-page', 'section', 'hero']) assert.match(source, new RegExp(`value: '${value}'`));
   assert.match(html, /<form id="editor-form" method="dialog">/);
   assert.match(html, /<dialog id="confirm-dialog" aria-labelledby="confirm-title"><form method="dialog">/);
   assert.match(html, /id="file-input" class="sr-only" type="file" accept="image\/\*,video\/\*" multiple/);
@@ -192,5 +192,16 @@ test('Library tags have accessible entry, suggestions, chips, and exact filterin
   ]) assert.ok(source.includes(snippet), `missing ${snippet}`);
   for (const rule of ['.tag-chip-list,.card-tags{', '.tag-remove{', '.card-tags .tag-chip{', '.card-tags .tag-overflow{']) {
     assert.ok(css.includes(rule), `missing ${rule}`);
+  }
+});
+
+test('Interactive Auto UI is explicitly passive and uses the shared request fields', async () => {
+  const source = await read('src/app.js');
+  const editor = source.slice(source.indexOf('function websiteCaptureEditor'), source.indexOf('function referenceEditor'));
+  assert.match(editor, /Interactive Auto · Passive WebGL/);
+  assert.match(editor, /interactionMode: 'passive'/);
+  assert.match(editor, /representativeMoments: 4/);
+  for (const action of ['clicks', 'types', 'points', 'forms', 'wallets', 'permissions', 'uploads', 'purchases', 'navigates']) {
+    assert.match(editor, new RegExp(action));
   }
 });

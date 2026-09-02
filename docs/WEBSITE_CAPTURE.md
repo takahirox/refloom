@@ -122,6 +122,52 @@ connections have finite limits. A clip above 40 million CSS pixels or an image
 above 25 MiB fails with a private `CAPTURE_LIMIT_EXCEEDED` diagnostic; public
 HTTP/MCP responses continue to expose only `CAPTURE_FAILED`.
 
+## Interactive Auto: passive WebGL observation
+
+`interactive-auto` is an explicit capture mode for Web3D experiences. Its only
+enabled interaction policy is `passive`. After the normal authoritative URL
+navigation and readiness boundary, Refloom observes the page for at most 30
+seconds. It detects visible canvas elements, records WebGL/WebGL2 context
+creation, and counts observable clear/draw calls. It chooses the largest active
+visible canvas deterministically.
+
+The observer samples bounded canvas screenshots at a fixed interval. It selects
+the first frame satisfying the configured consecutive-sample stability threshold
+(or a deterministic timeout fallback), then greedily chooses later frames by
+maximum minimum visual-change score until the requested total of three to five
+Moments is reached. Scores are deterministic
+normalized comparisons of bounded encoded visual samples; ties use observation
+order. Static experiences return the stable frame with an
+`insufficient_visual_change` warning rather than manufacturing duplicate
+meaning. A visible non-WebGL canvas, inactive WebGL canvas, or absent canvas
+returns a successful zero-Moment result with an explicit warning.
+
+Observation, sampling, per-screenshot work, aggregate candidate bytes, the
+whole browser operation, and persistence retries are bounded. Cancellation
+tears down the browser and keeps already committed records. If rendering fails
+after useful samples exist, selected samples are persisted and the result is
+`partial`; if no useful sample exists, the existing generic failure boundary is
+used where applicable.
+
+Each selected frame creates a separate Target and Moment. Identical screenshot
+bytes reuse an Asset—even across later captures of the same Reference—using the
+stored SHA-256 digest, while Target/Moment identity and selection provenance
+remain distinct. Provenance contains source and final URLs, viewport and preset,
+DPR, target canvas selector/bounds/context/activity, relative timestamp,
+stability criteria, selection reason and score, warnings, completion status,
+blocked actions, and the versioned ordered automation action schema.
+
+Passive mode permits only observation, bounded waiting, and screenshot capture.
+It never synthesizes clicks, keyboard or pointer input, form activity, wallet or
+permission requests, uploads, purchases, or navigation actions. The schema
+reserves `guided` and `explore` modes for future reviewable designs, but both are
+disabled and validation rejects them. No unsafe action executor is present.
+
+The browser UI and MCP `request_website_capture` send the same settings through
+`normalizeCaptureRequest`, use the same scheduler/service, and receive the same
+sanitized `publicCaptureResult` contract. Auto results include an `autoCapture`
+summary without exposing media IDs or local runtime details.
+
 ## Progressive persistence
 
 `captureReference` validates an existing, currently project-owned version-1 URL
@@ -159,8 +205,8 @@ preset/mode/viewport/checkpoint/readiness settings; they cannot supply a URL,
 executable, proxy, filesystem path, or dependency override. The Reference source URL is
 always reloaded as authoritative input.
 
-Video, animation recording, scripted interaction, semantic state detection,
-and assisted-motion capture are deliberately deferred.
+Video, animation recording, scripted input, semantic state inference, guided
+actions, and autonomous exploration remain deliberately disabled or deferred.
 
 ## External-agent implementation preview loop
 

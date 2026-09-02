@@ -215,7 +215,11 @@ test('stdio discovery, progressive reads, additive writes, media, errors, and re
   assert.equal(captureTool.annotations.openWorldHint, true);
   assert.deepEqual(Object.keys(captureTool.inputSchema.properties), ['referenceId', 'settings']);
   assert.deepEqual(captureTool.inputSchema.properties.settings.properties.preset.enum, ['desktop', 'tablet', 'mobile']);
-  assert.deepEqual(captureTool.inputSchema.properties.settings.properties.mode.enum, ['viewport', 'full-page', 'section', 'hero', 'scroll']);
+  assert.deepEqual(captureTool.inputSchema.properties.settings.properties.mode.enum, [
+    'viewport', 'full-page', 'section', 'hero', 'scroll', 'interactive-auto'
+  ]);
+  assert.deepEqual(captureTool.inputSchema.properties.settings.properties.interactionMode.enum, ['passive']);
+  assert.equal(captureTool.inputSchema.properties.settings.properties.representativeMoments.maximum, 5);
   assert.equal(captureTool.inputSchema.properties.settings.properties.selector.maxLength, 256);
 
   const projects = await mcp.request('tools/call', { name: 'list_projects', arguments: {} });
@@ -336,12 +340,30 @@ test('MCP reference creation defaults website capture on and supports both opt-o
 
 test('injected MCP capture returns structured results and bounded tool errors', async () => {
   const store = new MemoryRepository();
-  let next = { status: 'partial', captured: [{ assetId: 'a', targetId: 't', momentId: 'm', mediaId: 'hidden' }] };
+  let next = {
+    status: 'partial',
+    captured: [{ assetId: 'a', targetId: 't', momentId: 'm', mediaId: 'hidden' }],
+    summary: {
+      autoCapture: {
+        interactionMode: 'passive',
+        completionStatus: 'partial',
+        warnings: ['render_failure']
+      }
+    }
+  };
   const calls = [];
   const diagnostics = [];
   const mcp = createMcpServer({ store, diagnostics: { write: value => diagnostics.push(value) }, captureReference: async (...args) => { calls.push(args); return next; } });
   const partial = await mcp.handle({ method: 'tools/call', params: { name: 'request_website_capture', arguments: { referenceId: 'r', settings: { width: 800 } } } });
-  assert.deepEqual(partial.structuredContent, { status: 'partial', captured: [{ assetId: 'a', targetId: 't', momentId: 'm' }] });
+  assert.deepEqual(partial.structuredContent, {
+    status: 'partial',
+    captured: [{ assetId: 'a', targetId: 't', momentId: 'm' }],
+    autoCapture: {
+      interactionMode: 'passive',
+      completionStatus: 'partial',
+      warnings: ['render_failure']
+    }
+  });
   assert.equal(calls[0][1], 'r');
   assert.equal(calls[0][2].width, 800);
 

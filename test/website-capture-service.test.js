@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { createProject, createReference, createWorkspace, updateProject } from '../src/domain.js';
 import { RevisionConflictError } from '../src/persistence-errors.js';
@@ -93,6 +94,7 @@ test('persists complete capture provenance, relationships, and backup bytes', as
   const asset = workspace.assets[0];
   const target = workspace.targets[0];
   const moment = workspace.moments[0];
+  const digest = createHash('sha256').update(Buffer.from('png-0')).digest('hex');
   assert.equal(asset.referenceId, 'reference-1');
   assert.equal(asset.locator, 'blob:capture_media-1');
   assert.equal(target.assetId, asset.id);
@@ -105,6 +107,7 @@ test('persists complete capture provenance, relationships, and backup bytes', as
     viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
     preset: 'custom', mode: 'scroll',
     captureMethod: 'automated-browser', captureStrategy: 'deterministic-scroll',
+    screenshotSha256: digest,
     checkpointIndex: 0, checkpointY: 0, checkpointCount: 1,
     region: { x: 0, y: 0, width: 1280, height: 720 }, scroll: { x: 0, y: 0 }
   });
@@ -137,6 +140,63 @@ test('reuses an identical screenshot Asset while retaining distinct Target and M
   assert.equal(workspace.targets[0].assetId, workspace.targets[1].assetId);
   assert.notDeepEqual(workspace.moments[0].state.scroll, workspace.moments[1].state.scroll);
   assert.equal(store.media.size, 1);
+});
+
+test('deduplicates identical bytes against an earlier capture while preserving new Targets and Moments', async () => {
+  const store = await fixture();
+  const driver = async (_url, options) => {
+    await options.onScreenshot(screenshot());
+    return {};
+  };
+  await captureReference(store, 'reference-1', {}, dependencies(driver));
+  const result = await captureReference(store, 'reference-1', {}, dependencies(driver, [
+    'media-2', 'asset-2', 'target-2', 'moment-2'
+  ]));
+  assert.equal(result.status, 'complete');
+  const { workspace } = await store.load();
+  assert.equal(workspace.assets.length, 1);
+  assert.equal(workspace.targets.length, 2);
+  assert.equal(workspace.moments.length, 2);
+  assert.equal(workspace.targets[0].assetId, workspace.targets[1].assetId);
+  assert.equal(store.media.size, 1);
+});
+
+test('preserves passive auto provenance and useful partial completion', async () => {
+  const store = await fixture();
+  const shot = {
+    ...screenshot(),
+    mode: 'interactive-auto',
+    devicePixelRatio: 2,
+    targetCanvas: { selector: '#scene', contextType: 'webgl2' },
+    relativeTimestampMs: 500,
+    stabilityCriteria: { samples: 3, threshold: 0.015, intervalMs: 500 },
+    selectionReason: 'initial_stable',
+    selectionScore: 0.01,
+    warnings: ['render_failure'],
+    blockedActions: ['click'],
+    completionStatus: 'partial',
+    automation: { schemaVersion: 1, interactionMode: 'passive', actions: [] }
+  };
+  const result = await captureReference(
+    store,
+    'reference-1',
+    { mode: 'interactive-auto' },
+    dependencies(async (_url, options) => {
+      await options.onScreenshot(shot);
+      return {
+        autoCapture: {
+          interactionMode: 'passive',
+          completionStatus: 'partial',
+          warnings: ['render_failure']
+        }
+      };
+    })
+  );
+  assert.equal(result.status, 'partial');
+  assert.equal(
+    (await store.load()).workspace.moments[0].state.targetCanvas.selector,
+    '#scene'
+  );
 });
 
 test('failure before the first callback leaves the reference unchanged', async () => {

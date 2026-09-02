@@ -51,13 +51,19 @@ const tools = [
   { name: 'add_selection_to_board', description: 'Append an existing selection to an existing board.', inputSchema: required(objectSchema({ boardId: string('Board ID', 128), selectionId: string('Selection ID', 128), expectedRevision: { type: 'integer', minimum: 0 } }), 'boardId', 'selectionId') },
   {
     name: 'request_website_capture',
-    description: 'Capture a responsive viewport, full page, or useful first section from the authoritative sourceUrl of an existing reference.',
+    description: 'Capture the authoritative sourceUrl, including bounded passive Interactive Auto observation of visible WebGL activity.',
     inputSchema: required(objectSchema({
       referenceId: string('Reference ID', 128),
       settings: objectSchema({
         preset: { type: 'string', enum: ['desktop', 'tablet', 'mobile'] },
-        mode: { type: 'string', enum: ['viewport', 'full-page', 'section', 'hero', 'scroll'] },
+        mode: { type: 'string', enum: ['viewport', 'full-page', 'section', 'hero', 'scroll', 'interactive-auto'] },
         selector: string('Optional CSS selector for section capture', 256),
+        interactionMode: { type: 'string', enum: ['passive'] },
+        observationMs: { type: 'integer', minimum: 1000, maximum: 30000 },
+        sampleIntervalMs: { type: 'integer', minimum: 100, maximum: 2000 },
+        representativeMoments: { type: 'integer', minimum: 3, maximum: 5 },
+        stabilitySamples: { type: 'integer', minimum: 2, maximum: 8 },
+        stabilityThreshold: { type: 'number', minimum: 0, maximum: 1 },
         width: { type: 'integer', minimum: 320, maximum: 2560 },
         height: { type: 'integer', minimum: 320, maximum: 1440 },
         checkpoints: { type: 'integer', minimum: 1, maximum: 5 },

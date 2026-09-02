@@ -2,7 +2,9 @@ import { validateCaptureSettings } from './chrome-capture.js';
 
 export const CAPTURE_SETTING_KEYS = Object.freeze([
   'preset', 'mode', 'selector', 'width', 'height', 'checkpoints',
-  'readinessMs', 'settleMs', 'maxRedirects'
+  'readinessMs', 'settleMs', 'maxRedirects', 'interactionMode',
+  'observationMs', 'sampleIntervalMs', 'representativeMoments',
+  'stabilitySamples', 'stabilityThreshold'
 ]);
 
 export function normalizeCaptureRequest(value) {
@@ -42,6 +44,7 @@ export function publicCaptureResult(result) {
       targetId: item.targetId,
       momentId: item.momentId
     })) : [],
+    ...(result.summary?.autoCapture ? { autoCapture: structuredClone(result.summary.autoCapture) } : {}),
     ...(status === 'cancelled' ? { code: 'CAPTURE_CANCELLED' } : {})
   };
 }

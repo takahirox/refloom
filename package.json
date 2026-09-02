@@ -9,7 +9,7 @@
     "check:browser": "node scripts/check-browser.mjs",
     "test": "node --test test/*.test.js",
     "test:integration": "node scripts/test-integration.mjs",
-    "test:integration:container": "npm run check:browser && node --test test/integration/persistence.integration.test.js",
+    "test:integration:container": "npm run check:browser && node --test test/integration/*.integration.test.js",
     "check": "node scripts/check.mjs"
   },
   "engines": {
