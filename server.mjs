@@ -128,7 +128,9 @@ async function api(request, response, pathname, store, captureScheduler, analysi
     const media = await store.mediaInfo(decodeURIComponent(pathname.slice('/api/media/'.length)));
     return send(response, 200, media.contents, { 'Content-Type': media.mediaType });
   }
-  const allow = pathname === '/api/captures' ? 'POST'
+  const allow = pathname === '/api/analyses' ? 'POST'
+    : analysisRoute ? (analysisRoute[2] ? 'GET, DELETE' : 'GET')
+    : pathname === '/api/captures' ? 'POST'
     : /^\/api\/captures\/[^/]+\/status$/.test(pathname) ? 'GET, DELETE'
       : pathname === '/api/workspace' || pathname === '/api/backup' ? 'GET, PUT' : 'GET';
   if (pathname.startsWith('/api/')) return send(response, 405, 'Method not allowed', { Allow: allow });

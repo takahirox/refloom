@@ -2,6 +2,8 @@
 export const ANALYSIS_PRODUCT = 'visparse.design-profile';
 export const ANALYSIS_LIMIT = 32;
 export const ANALYSIS_BYTES = 1024 * 1024;
+// Visparse SourceEvidence.MAX_INPUT_BYTES at the supported revision (decimal).
+export const ANALYSIS_IMAGE_BYTES = 1_000_000;
 const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const text = value => typeof value === 'string' && value.length > 0 && value.length <= 256;
 const date = value => typeof value === 'string' && Number.isFinite(Date.parse(value));

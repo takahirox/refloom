@@ -16,6 +16,8 @@ test('HTTP requests analysis; MCP discovers and reads it without another invocat
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); await server.initialization;
   t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); await server.repositoryClosed; await mcp.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;
+  const invalidMethod = await fetch(`${origin}/api/analyses`);
+  assert.equal(invalidMethod.status, 405); assert.equal(invalidMethod.headers.get('allow'), 'POST');
   const post = value => fetch(`${origin}/api/analyses`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
   assert.equal((await post({ referenceId: 'r', assetId: 'a', executable: '/bin/sh' })).status, 400);
   const response = await post({ referenceId: 'r', assetId: 'a' });

@@ -63,7 +63,6 @@ def main():
     from visparse.agent_config import AnalyzerConfig
     from visparse.design import CodexDesignAnalyzer, run_design_analyzer, normalize_design_profile
     from visparse.model import SourceEvidence, MAX_INPUT_BYTES
-    from visparse.contracts import load_json
 
     # Package releases currently share 0.1.0; bind reuse to the installed code too.
     root = pathlib.Path(visparse.__file__).parent
@@ -79,12 +78,16 @@ def main():
     if sys.argv[1:] == ['info']:
         print(json.dumps({'version': identity}))
         return
-    raw = sys.stdin.buffer.read(16 * 1024 * 1024 + 1)
-    if len(raw) > 16 * 1024 * 1024:
+    # This is a private transport envelope, not a Visparse analysis document.
+    # Base64 expansion must not consume the source image's own byte budget.
+    raw = sys.stdin.buffer.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
         raise ValueError('input limit')
-    request = load_json(raw.decode())
+    request = json.loads(raw)
+    if not isinstance(request, dict) or set(request) != {'image', 'config', 'intent'}:
+        raise ValueError('invalid transport')
     data = base64.b64decode(request['image'], validate=True)
-    if len(data) > min(MAX_INPUT_BYTES, 8 * 1024 * 1024):
+    if len(data) > min(MAX_INPUT_BYTES, 1_000_000):
         raise ValueError('image limit')
     source = SourceEvidence('reference-1', 'screenshot', 'file:sha256:' + hashlib.sha256(data).hexdigest(), data)
     config = AnalyzerConfig.resolve({'analyzer': request['config']}, command='analyze-design')

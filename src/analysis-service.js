@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { analysisSummary, ANALYSIS_LIMIT, ANALYSIS_PRODUCT, validateAnalyses } from './reference-analysis.js';
+import { analysisSummary, ANALYSIS_LIMIT, ANALYSIS_PRODUCT, ANALYSIS_IMAGE_BYTES, validateAnalyses } from './reference-analysis.js';
 import { createVisparseRunner, analysisError, digest } from './visparse-runner.js';
 import { RevisionConflictError } from './persistence-errors.js';
 
@@ -77,7 +77,7 @@ export class AnalysisService {
     const bytes = media.contents;
     const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
     const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
-    if (bytes.length > 8 * 1024 * 1024 || (asset.mediaType === 'image/png' ? !png : !jpeg)) throw analysisError('ANALYSIS_UNSUPPORTED_EVIDENCE');
+    if (bytes.length > ANALYSIS_IMAGE_BYTES || (asset.mediaType === 'image/png' ? !png : !jpeg)) throw analysisError('ANALYSIS_UNSUPPORTED_EVIDENCE');
     const info = await this.runner.info();
     if (typeof info.version !== 'string' || info.version.length > 256) throw analysisError('ANALYSIS_UNAVAILABLE');
     const input = { assetId: asset.id, locator: asset.locator, sha256: digest(bytes), sourceId: 'reference-1', role: 'reference', transform: 'none' };

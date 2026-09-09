@@ -77,6 +77,15 @@ test('unsupported input and process-setting injection fail before model invocati
   assert.equal(f.calls(), 0);
 });
 
+test('images beyond the real Visparse limit are rejected before analyzer preflight', async () => {
+  const f = fixture(); let preflights = 0;
+  f.runner.info = async () => { preflights++; return { version: 'test-1' }; };
+  const image = Buffer.alloc(1_000_001); png.copy(image);
+  f.store.mediaInfo = async () => ({ contents: image, mediaType: 'image/png' });
+  await assert.rejects(f.service.request(request), { code: 'ANALYSIS_UNSUPPORTED_EVIDENCE' });
+  assert.equal(preflights, 0); assert.equal(f.calls(), 0);
+});
+
 test('invalid identity is a failure and failed re-analysis preserves a prior result', async () => {
   const f = fixture(); const a = await f.service.request(request); await finish(f.service);
   f.runner.analyze = async () => ({ version: 'test-1', result: profile('0'.repeat(64)) });

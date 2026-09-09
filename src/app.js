@@ -374,7 +374,7 @@ async function analysisEditor(reference) {
   const close = element('button', { type: 'button', text: 'Close' });
   const modal = element('dialog', { className: 'analysis-dialog', 'aria-label': 'Reference analysis' }, [
     element('h2', { text: 'Reference analysis' }),
-    element('p', { text: 'Analysis sends this image to the configured analyzer. Results are derived interpretations, separate from the original evidence. Matching results are reused.' }),
+    element('p', { text: 'Analysis sends one PNG/JPEG image (up to 1,000,000 bytes) to the configured analyzer. Results are derived interpretations, separate from the original evidence. Matching results are reused.' }),
     asset, intent, element('label', {}, [force, document.createTextNode(' Run again even if a matching result exists')]), start, status, preview, history, summary, rawDetails, close
   ]);
   document.body.append(modal);
@@ -411,10 +411,10 @@ async function analysisEditor(reference) {
               element('p', { text: result.stale ? 'This result describes earlier evidence.' : `Status: ${result.status}` }),
               ...(!profile ? [] : [
                 element('h4', { text: 'Observations' }),
-                ...profile.observations.map(o => element('p', { text: o.statement })),
+                ...profile.observations.filter(o => o && typeof o.statement === 'string').map(o => element('p', { text: o.statement })),
                 element('h4', { text: 'Interpretations' }),
-                ...profile.interpretations.map(i => {
-                  const confidence = profile.confidence.find(c => c.id === i.confidence_id);
+                ...profile.interpretations.filter(i => i && typeof i.statement === 'string').map(i => {
+                  const confidence = profile.confidence.find(c => c && c.id === i.confidence_id);
                   return element('p', { text: `${i.statement}${confidence ? ` — Confidence: ${confidence.level}. ${confidence.uncertainty}` : ''}` });
                 })
               ])

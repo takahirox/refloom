@@ -100,7 +100,7 @@ claimed producer really ran. Visparse is not required to read/import a backup.
 
 There is one active analysis per workspace across HTTP/MCP processes, no queued
 model work, and at most four concurrent preflight requests per process. Busy
-requests return `ANALYSIS_BUSY`. Each image is at most 8 MiB; provider stdout and
+requests return `ANALYSIS_BUSY`. Each image is at most 1,000,000 bytes (the supported Visparse source limit); provider stdout and
 stderr, bridge output and each attachment are bounded to 1 MiB. Existing overall workspace
 limits still apply. At most 32 attempts are retained per Reference; a full history
 returns `ANALYSIS_HISTORY_FULL` rather than deleting results implicitly.

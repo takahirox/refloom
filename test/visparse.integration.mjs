@@ -39,3 +39,11 @@ test('aborting the bridge terminates analysis', async () => {
   setTimeout(() => controller.abort(), 100);
   await assert.rejects(pending, { code: 'ANALYSIS_CANCELLED' });
 });
+
+test('the maximum source size survives Base64 transport expansion', async () => {
+  const runner = createVisparseRunner(environment());
+  const image = Buffer.alloc(1_000_000); png.copy(image);
+  const result = await runner.analyze(image, 'preserve');
+  assert.equal(result.result.schema_version, '0.3');
+  await assert.rejects(runner.analyze(Buffer.concat([image, Buffer.from([0])]), 'preserve'), { code: 'ANALYSIS_FAILED' });
+});
