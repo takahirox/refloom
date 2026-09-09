@@ -54,7 +54,8 @@ require a new privacy, authorization, retention, and operations design.
 
 Optional provider integrations for enrichment or synthesis, with provenance,
 consent, cost, model disclosure, data-boundary controls, and useful non-AI
-fallbacks. Refloom 0.1 sends no data to an AI provider.
+fallbacks. The optional Visparse integration sends selected image evidence only on explicit
+analysis requests after operator configuration; see [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md).
 
 ## Future: legal and copyright policy
 

@@ -3,7 +3,7 @@
 ## Decisions
 
 Refloom 0.1 is a browser application served by a small Node.js HTTP service. It
-has no account system, hosted API, telemetry, or AI dependency. PostgreSQL and a
+has no account system, hosted API, telemetry, or mandatory AI dependency. PostgreSQL and a
 private S3-compatible object store provide one cloud-capable persistence path
 for local Compose and deployed environments.
 
@@ -16,7 +16,7 @@ The browser code is separated into these boundaries:
 
 - `domain.js`: immutable workspace operations, relationships, validation,
   deletion cascades, factual signals, and creative-direction export.
-- `storage.js`: browser HTTP repository and backup-v3 encoding/decoding.
+- `storage.js`: browser HTTP repository and backup-v4 encoding/decoding.
 - `postgres-workspace-repository.js`: normalized relational reconstruction,
   revision transactions, backup snapshots, and authorized media access.
 - `s3-media-store.js`: immutable verified media writes/reads and bounded orphan
@@ -67,14 +67,15 @@ reference, and advances the revision exactly once. A database failure after an
 upload leaves a safe orphan; grace-based bounded cleanup removes it later.
 
 The same-origin API loads and commits complete workspaces, reads referenced
-media, and imports/exports backup version 3. Host and Origin checks,
+media, and imports/exports backup version 4. Host and Origin checks,
 JSON and body limits, validation, and optimistic revisions protect the local
 boundary. It intentionally has no CORS policy and is not a public listener.
 
 There is no IndexedDB or filesystem authority/migration path. The ordered
-Reference-tag cutover requires a reset PostgreSQL database. Backup version 3 is
-the only supported backup contract; versions 1 and 2 are rejected without a
-reader or upgrade shim. `localStorage` contains only the current project ID.
+Reference-analysis migration adds a JSONB attachment column without resetting
+existing data. Backup version 4 is emitted; version 3 upgrades deterministically,
+while versions 1/2 remain unsupported. `localStorage` contains only the current
+project ID.
 Object URLs used for previews are temporary presentation resources, not durable
 storage.
 
@@ -128,3 +129,12 @@ bounded reads and mutations, not an atomic restorable backup. A future domain
 migration must be explicit, deterministic, tested, and preserve provenance,
 IDs, relationships, and media. See `PRODUCT_SPEC.md` for the product and
 migration decisions and `EXPORT_SCHEMA.md` for portable interchange contracts.
+
+## Optional derived analysis
+
+`analysis-service.js` uses the shared revision boundary to claim and finalize
+manual analysis runs. `visparse-runner.js` and `scripts/visparse-bridge.py` invoke
+a configured Visparse installation through a bounded process boundary. The
+`reference-analysis.js` attachment contract is portable and browser-safe.
+References remain project-owned; analysis is not an ownership migration. See
+[REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md) for lifecycle and evidence boundaries.

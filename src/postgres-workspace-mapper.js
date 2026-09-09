@@ -47,7 +47,7 @@ export function workspaceToRows(workspace) {
       id: entity.id, project_id: entity.projectId, title: entity.title ?? null,
       source_url: entity.sourceUrl ?? null, creator: entity.creator ?? null,
       notes: entity.notes ?? null, captured_at: timestamp(entity.capturedAt, 'capturedAt'),
-      capture_method: entity.captureMethod, ...stampsToRow(entity)
+      capture_method: entity.captureMethod, analyses: clone(entity.analyses ?? []), ...stampsToRow(entity)
     })),
     reference_tags: value.references.flatMap(reference => reference.tags.map((tag, position) => ({
       reference_id: reference.id, position, tag
@@ -202,7 +202,8 @@ export function rowsToWorkspace(rowSets, settings = { automaticWebsiteCapture: t
       id: row.id, projectId: row.project_id, ...present('title', optional(row.title)),
       ...present('sourceUrl', optional(row.source_url)), ...present('creator', optional(row.creator)),
       ...present('notes', optional(row.notes)), tags: referenceTags.get(row.id).map(item => item.tag),
-      capturedAt: timestamp(row.captured_at, 'captured_at'), captureMethod: row.capture_method, ...stampsFromRow(row)
+      capturedAt: timestamp(row.captured_at, 'captured_at'), captureMethod: row.capture_method,
+      ...(row.analyses?.length ? { analyses: clone(row.analyses) } : {}), ...stampsFromRow(row)
     })),
     assets: stableRows(rowSets.assets).map(row => ({
       id: row.id, projectId: row.project_id, referenceId: row.reference_id,
@@ -241,12 +242,12 @@ export function rowsToWorkspace(rowSets, settings = { automaticWebsiteCapture: t
 
 const specification = (text, fields) => Object.freeze({
   text,
-  values: row => fields.map(field => row[field])
+  values: row => fields.map(field => field === 'analyses' ? JSON.stringify(row[field]) : row[field])
 });
 
 export const INSERT_SPECIFICATIONS = Object.freeze({
   projects: specification('insert into projects (id, title, brief, created_at, updated_at) values ($1, $2, $3, $4, $5)', ['id', 'title', 'brief', 'created_at', 'updated_at']),
-  references: specification('insert into "references" (id, project_id, title, source_url, creator, notes, captured_at, capture_method, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)', ['id', 'project_id', 'title', 'source_url', 'creator', 'notes', 'captured_at', 'capture_method', 'created_at', 'updated_at']),
+  references: specification('insert into "references" (id, project_id, title, source_url, creator, notes, captured_at, capture_method, created_at, updated_at, analyses) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)', ['id', 'project_id', 'title', 'source_url', 'creator', 'notes', 'captured_at', 'capture_method', 'created_at', 'updated_at', 'analyses']),
   reference_tags: specification('insert into reference_tags (reference_id, position, tag) values ($1, $2, $3)', ['reference_id', 'position', 'tag']),
   assets: specification('insert into assets (id, project_id, reference_id, kind, locator, media_type, captured_at, provenance, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)', ['id', 'project_id', 'reference_id', 'kind', 'locator', 'media_type', 'captured_at', 'provenance', 'created_at', 'updated_at']),
   targets: specification('insert into targets (id, project_id, reference_id, asset_id, kind, detail, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8)', ['id', 'project_id', 'reference_id', 'asset_id', 'kind', 'detail', 'created_at', 'updated_at']),

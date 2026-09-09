@@ -170,10 +170,11 @@ is the sole captured-media authority. Browser, HTTP, MCP, and capture coordinate
 through the same global revision. The browser stores no authoritative data;
 `localStorage` retains only the selected project ID.
 
-This breaking cutover has no database or backup upgrade path. Reset or recreate
-the PostgreSQL database before starting this build. Backup versions 1 and 2, raw
-workspace files, and other pre-cutover persistence are rejected rather than
-migrated.
+Reference analysis adds a non-destructive SQL migration and workspace version 3.
+Backup version 4 includes derived analysis; version-3 backups have an explicit
+upgrade preserving existing data. Versions 1/2 remain unsupported. Stop older
+HTTP/MCP processes before upgrading and export a backup first. See
+[reference analysis](docs/REFERENCE_ANALYSIS.md) for compatibility and rollback.
 
 Download workspace backups regularly. A backup contains the complete workspace,
 provenance, source URLs, notes, and base64-encoded captured media, so treat it as
@@ -196,7 +197,7 @@ direction export, validated backup/import, cascade deletion, and local reset.
 
 Not included: video/hover/click/drag capture, semantic transition detection,
 semantic search or recommendations, persistent personal/team contexts, collaboration,
-hosted sync, AI providers, or legal/copyright policy automation. See
+hosted sync, general AI-provider management, or legal/copyright policy automation. See
 [docs/ROADMAP.md](docs/ROADMAP.md).
 
 The living product specification, current slice, technical boundaries, and
@@ -207,3 +208,12 @@ portable formats are documented in
 [docs/EXPORT_SCHEMA.md](docs/EXPORT_SCHEMA.md), and
 [docs/PRIVACY_SECURITY.md](docs/PRIVACY_SECURITY.md). Website-capture controls
 and limits are in [docs/WEBSITE_CAPTURE.md](docs/WEBSITE_CAPTURE.md).
+
+## Optional reference analysis
+
+Use **More → Analysis** on a Reference to analyze one saved PNG/JPEG with Visparse,
+view derived results beside the original evidence, and reuse them through UI/MCP.
+Analysis is manual and disabled until configured; capture and stored-result reads
+remain independent of it. The tested execution placement is a host Node/Python
+installation. The stock Compose image leaves analysis disabled. See
+[setup, scope, limits and verification](docs/REFERENCE_ANALYSIS.md).

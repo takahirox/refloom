@@ -127,3 +127,14 @@ update channel, or legal/copyright determination in 0.1. The localhost server is
 for local development and personal use, not direct Internet exposure. Security
 reports should include reproduction steps, affected version, and impact while
 avoiding unnecessary disclosure of real private workspace data.
+
+## Optional analysis
+
+Analysis is disabled by default and only an explicit analysis action sends one
+stored image to the configured analyzer. Capture settings do not enable it.
+Operator-configured Visparse/agent executables are trusted code, not request
+parameters; Refloom bounds their process groups, input/output and temporary files.
+Public errors omit raw provider diagnostics. Model outputs and imported results
+remain untrusted derived text and are rendered as text. Stored-result reads never
+invoke providers. See [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md) for configuration,
+usage-limit behavior, process failure and credential boundaries.

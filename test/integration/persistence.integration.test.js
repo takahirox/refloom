@@ -10,6 +10,11 @@ import {
 } from '../../src/domain.js';
 import { RevisionConflictError } from '../../src/persistence-errors.js';
 import { captureReference } from '../../src/website-capture-service.js';
+import { AnalysisService } from '../../src/analysis-service.js';
+import { digest } from '../../src/visparse-runner.js';
+import { profile, png } from '../fixtures/analysis-profile.mjs';
+import { readMigrations, runPostgresMigrations } from '../../src/postgres-migrations.js';
+import pg from 'pg';
 
 function repository() {
   return createPersistenceRepository({ env: process.env }).repository;
@@ -206,4 +211,46 @@ test('PostgreSQL and S3 are one authoritative path for repository, HTTP, and MCP
     'select tag from reference_tags where reference_id = $1 order by position', ['reference_1']
   );
   assert.deepEqual(tags.rows.map(row => row.tag), ['visual-study', 'motion']);
+});
+
+test('stored analysis survives PostgreSQL reload and S3 backup; another process reuses it', async t => {
+  const store = repository(); await store.initialize(); t.after(() => store.close());
+  let workspace = createProject(createWorkspace(), { id: 'analysis_p', title: 'Analysis' });
+  workspace = createReference(workspace, { id: 'analysis_r', projectId: 'analysis_p', captureMethod: 'website-capture' });
+  workspace = createAsset(workspace, { id: 'analysis_a', referenceId: 'analysis_r', kind: 'image', mediaType: 'image/png', locator: 'blob:analysis_media', provenance: { captureMethod: 'website', mode: 'viewport' } });
+  await store.commit((await store.load()).revision, workspace, [{ id: 'analysis_media', data: png, type: 'image/png', name: 'capture.png' }]);
+  let calls = 0;
+  const runner = { enabled: true, configuration: 'fixture', timeoutMs: 10000, info: async () => ({ version: 'fixture' }),
+    analyze: async () => { calls++; return { version: 'fixture', result: profile(digest(png)) }; } };
+  const service = new AnalysisService({ store, runner }); t.after(() => service.close());
+  const input = { referenceId: 'analysis_r', assetId: 'analysis_a' };
+  const job = await service.request(input); await Promise.all([...service.jobs.values()].map(j => j.promise));
+  assert.equal((await service.get(input.referenceId, job.id)).status, 'complete');
+  const backup = await store.exportBackup();
+  const freshStore = repository(); await freshStore.initialize(); t.after(() => freshStore.close());
+  const other = new AnalysisService({ store: freshStore, runner }); t.after(() => other.close());
+  assert.equal((await other.request(input)).id, job.id); assert.equal(calls, 1);
+  await store.commit((await store.load()).revision, createWorkspace());
+  await assert.rejects(other.get(input.referenceId, job.id), { code: 'ANALYSIS_NOT_FOUND' });
+  await store.importBackup((await store.load()).revision, backup);
+  assert.deepEqual((await other.get(input.referenceId, job.id)).result, profile(digest(png)));
+  assert.deepEqual((await freshStore.mediaInfo('analysis_media')).contents, png);
+});
+
+test('0003 upgrades existing SQL rows without resetting references or revision', async t => {
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const connection = await pool.connect();
+  const schema = `analysis_upgrade_${process.pid}`;
+  await connection.query(`create schema ${schema}`);
+  await connection.query(`set search_path to ${schema}`);
+  t.after(async () => { await connection.query('set search_path to public'); await connection.query(`drop schema ${schema} cascade`); connection.release(); await pool.end(); });
+  const scopedPool = { connect: async () => ({ query: (...args) => connection.query(...args), release() {} }) };
+  const migrations = await readMigrations();
+  await runPostgresMigrations(scopedPool, { migrations: migrations.slice(0, 2) });
+  await connection.query("insert into projects (id,title,created_at,updated_at) values ('p','Existing',now(),now())");
+  await connection.query(`insert into "references" (id,project_id,captured_at,capture_method,created_at,updated_at) values ('r','p',now(),'file',now(),now())`);
+  await connection.query('update workspace_state set revision = 7');
+  await runPostgresMigrations(scopedPool, { migrations });
+  assert.deepEqual((await connection.query('select id, analyses from "references"')).rows, [{ id: 'r', analyses: [] }]);
+  assert.equal(Number((await connection.query('select revision from workspace_state')).rows[0].revision), 7);
 });

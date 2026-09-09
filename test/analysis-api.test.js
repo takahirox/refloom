@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { once } from 'node:events';
+import { createRefloomServer } from '../server.mjs';
+import { createMcpServer } from '../mcp-server.mjs';
+import { MemoryStore } from './fixtures/analysis-store.mjs';
+import { digest } from '../src/visparse-runner.js';
+import { profile, png } from './fixtures/analysis-profile.mjs';
+
+test('HTTP requests analysis; MCP discovers and reads it without another invocation', async t => {
+  const store = new MemoryStore(); let calls = 0;
+  const runner = { enabled: true, configuration: 'fixture', timeoutMs: 10000, info: async () => ({ version: 'fixture' }),
+    analyze: async () => { calls++; return { version: 'fixture', result: profile(digest(png)) }; } };
+  const server = createRefloomServer({ store, analysisRunner: runner });
+  const mcp = createMcpServer({ store, analysisRunner: runner, diagnostics: { write() {} } });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening'); await server.initialization;
+  t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); await server.repositoryClosed; await mcp.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const invalidMethod = await fetch(`${origin}/api/analyses`);
+  assert.equal(invalidMethod.status, 405); assert.equal(invalidMethod.headers.get('allow'), 'POST');
+  const post = value => fetch(`${origin}/api/analyses`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+  assert.equal((await post({ referenceId: 'r', assetId: 'a', executable: '/bin/sh' })).status, 400);
+  const response = await post({ referenceId: 'r', assetId: 'a' });
+  assert.equal(response.status, 202); const created = await response.json();
+  await Promise.all([...server.analysisService.jobs.values()].map(j => j.promise));
+  const list = await (await fetch(`${origin}/api/references/r/analyses`)).json();
+  assert.equal(list.items[0].status, 'complete'); assert.equal(list.items[0].result, undefined);
+  const call = (name, args) => mcp.handle({ method: 'tools/call', params: { name, arguments: args } });
+  const detail = await call('get_reference_analysis', { referenceId: 'r', analysisId: created.id });
+  assert.equal(detail.structuredContent.derived, true);
+  assert.deepEqual(detail.structuredContent.result, profile(digest(png)));
+  const reference = await call('get_reference', { referenceId: 'r' });
+  assert.equal(reference.structuredContent.reference.analyses, undefined);
+  assert.equal(reference.structuredContent.analysisCount, 1);
+  const summaries = await call('list_reference_analyses', { referenceId: 'r', limit: 1 });
+  assert.equal(summaries.structuredContent.items.length, 1);
+  const repeated = await call('request_reference_analysis', { referenceId: 'r', assetId: 'a' });
+  assert.equal(repeated.structuredContent.reused, true); assert.equal(calls, 1);
+  const wrongReference = await call('get_reference_analysis', { referenceId: 'missing', analysisId: created.id });
+  assert.equal(wrongReference.structuredContent.error.code, 'ANALYSIS_NOT_FOUND');
+  const badLimit = await call('list_reference_analyses', { referenceId: 'r', limit: 1000 });
+  assert.equal(badLimit.isError, true);
+});

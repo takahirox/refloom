@@ -95,7 +95,7 @@ services:
       REFLOOM_MEDIA_ORPHAN_GRACE_MS: "0"
     command: ["npm", "run", "test:integration:container"]
     volumes:
-      - ./test/integration:/app/test/integration:ro
+      - ./test:/app/test:ro
     restart: "no"
     security_opt:
       - no-new-privileges:true

@@ -136,7 +136,7 @@ test('reference card footer is one compact row with an accented select and icon 
 
 test('the More disclosure overlays upward inside the card instead of growing it', async () => {
   const [source, css] = await Promise.all([read('src/app.js'), read('public/styles.css')]);
-  assert.match(source, /className: 'more-panel', id: [^\n]*\}, \[add, websiteCapture, cancelCapture, remove\]/);
+  assert.match(source, /className: 'more-panel', id: [^\n]*\}, \[add, websiteCapture, cancelCapture, analyses, remove\]/);
   assert.match(source, /morePanel\.hidden = true;/);
   assert.match(source, /className: 'icon-button more-toggle', 'aria-expanded': 'false', 'aria-controls': morePanel\.id, title: 'More actions'/);
   assert.match(source, /moreToggle\.setAttribute\('aria-expanded', String\(expanded\)\)/);

@@ -55,5 +55,5 @@ test('real Chromium passively captures representative WebGL moments', async t =>
   assert.ok(captured.every(item => item.targetCanvas.selector === '#scene'));
   assert.ok(captured.every(item => item.blockedActions.includes('click')));
   assert.ok(captured.every(item => item.automation.interactionMode === 'passive'));
-  assert.ok(captured.every(item => item.automation.actionSchema.modes.guided.enabled === false));
+  assert.ok(captured.every(item => item.automation.actions.every(action => ['observe', 'wait', 'capture'].includes(action.type))));
 });

@@ -260,7 +260,7 @@ test('cleanup passes exactly current media_objects IDs', async () => {
   assert.deepEqual([...options.referencedIds], ['keep-a', 'keep-b']);
 });
 
-test('backup export captures one snapshot then fetches verified objects as backup v3', async () => {
+test('backup export captures one snapshot then fetches verified objects as backup v4', async () => {
   const workspace = workspaceWithBlob();
   const events = [];
   const pool = new FakePool((text, values, client) => {
@@ -299,7 +299,7 @@ test('backup export captures one snapshot then fetches verified objects as backu
   };
   const repository = new PostgresWorkspaceRepository({ pool, mediaStore });
   const backup = JSON.parse(await repository.exportBackup());
-  assert.equal(backup.version, 3);
+  assert.equal(backup.version, 4);
   assert.deepEqual(backup.workspace.references[0].tags, ['beta', 'alpha']);
   assert.equal(backup.binaries[0].data, 'aGVsbG8=');
   assert.equal(backup.binaries[0].type, 'text/plain');

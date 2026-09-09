@@ -10,7 +10,8 @@
     "test": "node --test test/*.test.js",
     "test:integration": "node scripts/test-integration.mjs",
     "test:integration:container": "npm run check:browser && node --test test/integration/*.integration.test.js",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "test:analysis": "node --test test/visparse.integration.mjs"
   },
   "engines": {
     "node": ">=22"
