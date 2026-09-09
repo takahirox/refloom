@@ -358,6 +358,95 @@ function websiteCaptureEditor(reference, control) {
   }, control));
 }
 
+async function analysisEditor(reference) {
+  const returnFocus = document.activeElement;
+  const assets = workspace.assets.filter(a => a.referenceId === reference.id && a.kind === 'image' && ['image/png', 'image/jpeg'].includes(a.mediaType) && blobIdFromLocator(a.locator));
+  const asset = element('select', { 'aria-label': 'Image to analyze' }, assets.map(a => element('option', { value: a.id, text: a.provenance?.filename || a.id })));
+  const intent = element('select', { 'aria-label': 'Analysis purpose' }, [element('option', { value: 'preserve', text: 'Preserve appearance' }), element('option', { value: 'adapt', text: 'Adapt principles' })]);
+  const force = element('input', { type: 'checkbox' });
+  const status = element('p', { role: 'status', 'aria-live': 'polite' });
+  const history = element('div');
+  const summary = element('div');
+  const output = element('pre', { className: 'analysis-output', tabIndex: '0' });
+  const rawDetails = element('details', {}, [element('summary', { text: 'Analysis data and provenance' }), output]);
+  const preview = element('img', { className: 'preview', alt: 'Original evidence selected for analysis' });
+  const start = element('button', { type: 'button', text: 'Analyze selected image' });
+  const close = element('button', { type: 'button', text: 'Close' });
+  const modal = element('dialog', { className: 'analysis-dialog', 'aria-label': 'Reference analysis' }, [
+    element('h2', { text: 'Reference analysis' }),
+    element('p', { text: 'Analysis sends this image to the configured analyzer. Results are derived interpretations, separate from the original evidence. Matching results are reused.' }),
+    asset, intent, element('label', {}, [force, document.createTextNode(' Run again even if a matching result exists')]), start, status, preview, history, summary, rawDetails, close
+  ]);
+  document.body.append(modal);
+  let timer;
+  let previewUrl;
+  let previewGeneration = 0;
+  async function showAsset(id) {
+    const generation = ++previewGeneration;
+    const original = assets.find(a => a.id === id);
+    if (!original) return;
+    try {
+      const blob = await repository.blob(blobIdFromLocator(original.locator));
+      if (!modal.open || generation !== previewGeneration) return;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(blob); preview.src = previewUrl;
+    } catch { status.textContent = 'Original image unavailable'; }
+  }
+  async function refresh() {
+    clearTimeout(timer);
+    try {
+      const data = await repository.analyses(reference.id);
+      if (!modal.open) return;
+      start.disabled = !data.enabled || !assets.length;
+      status.textContent = !data.enabled ? 'Analysis is not configured. Stored results remain readable.' : !assets.length ? 'Attach a PNG or JPEG image to analyze.' : `${data.total} analysis runs`;
+      history.replaceChildren(...data.items.map(item => {
+        const view = element('button', { type: 'button', text: 'View analysis' });
+        view.addEventListener('click', async () => {
+          try {
+            const result = await repository.analysis(reference.id, item.id);
+            output.textContent = JSON.stringify(result, null, 2);
+            const profile = result.result;
+            summary.replaceChildren(
+              element('h3', { text: 'Derived analysis' }),
+              element('p', { text: result.stale ? 'This result describes earlier evidence.' : `Status: ${result.status}` }),
+              ...(!profile ? [] : [
+                element('h4', { text: 'Observations' }),
+                ...profile.observations.map(o => element('p', { text: o.statement })),
+                element('h4', { text: 'Interpretations' }),
+                ...profile.interpretations.map(i => {
+                  const confidence = profile.confidence.find(c => c.id === i.confidence_id);
+                  return element('p', { text: `${i.statement}${confidence ? ` — Confidence: ${confidence.level}. ${confidence.uncertainty}` : ''}` });
+                })
+              ])
+            );
+            asset.value = result.assetId; await showAsset(result.assetId);
+          }
+          catch (error) { status.textContent = error.message; }
+        });
+        const cancel = item.status === 'running' ? element('button', { type: 'button', text: 'Cancel analysis' }) : null;
+        cancel?.addEventListener('click', async () => {
+          try { await repository.analysis(reference.id, item.id, true); await refresh(); }
+          catch (error) { status.textContent = error.message; }
+        });
+        return element('div', { className: 'analysis-entry' }, [element('p', { text: `${item.status}${item.stale ? ' (stale evidence)' : ''} · ${item.intent} · ${new Date(item.createdAt).toLocaleString()}${item.code ? ` · ${item.code}` : ''}` }), view, cancel]);
+      }));
+      if (data.items.some(i => i.status === 'running')) timer = setTimeout(refresh, 1500);
+    } catch (error) { if (modal.open) status.textContent = error.message; }
+  }
+  start.addEventListener('click', async () => {
+    start.disabled = true;
+    try { await repository.requestAnalysis({ referenceId: reference.id, assetId: asset.value, intent: intent.value, force: force.checked }); force.checked = false; await refresh(); }
+    catch (error) { status.textContent = error.message; start.disabled = false; }
+  });
+  asset.addEventListener('change', () => showAsset(asset.value));
+  close.addEventListener('click', () => modal.close());
+  modal.addEventListener('close', async () => {
+    clearTimeout(timer); if (previewUrl) URL.revokeObjectURL(previewUrl); modal.remove(); returnFocus?.focus();
+    try { workspace = await repository.load(); await render(); } catch (error) { announce(error.message, true); }
+  }, { once: true });
+  modal.showModal(); close.focus(); await showAsset(asset.value); await refresh();
+}
+
 function referenceEditor(reference) {
   const tags = tagEditor(reference.tags, reference.id);
   tags.setSuggestions(listReferenceTagSuggestions(projectItems('references')).map(({ tag }) => tag));
@@ -555,7 +644,9 @@ async function renderLibrary() {
       if (!await confirmAction(`Delete “${name}” and all its assets and selections?`)) return;
       await commit(deleteReference(workspace, reference.id), [], 'Reference deleted');
     });
-    const morePanel = element('div', { className: 'more-panel', id: `more-${reference.id}` }, [add, websiteCapture, cancelCapture, remove]);
+    const analyses = element('button', { type: 'button', text: 'Analysis' });
+    analyses.addEventListener('click', () => analysisEditor(reference));
+    const morePanel = element('div', { className: 'more-panel', id: `more-${reference.id}` }, [add, websiteCapture, cancelCapture, analyses, remove]);
     morePanel.hidden = true;
     const moreToggle = iconControl({
       className: 'icon-button more-toggle', 'aria-expanded': 'false', 'aria-controls': morePanel.id, title: 'More actions', 'aria-label': `More actions for ${name}`

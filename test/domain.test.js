@@ -44,9 +44,9 @@ test('Reference tags normalize, deduplicate, update immutably, and stay bounded'
   assert.throws(() => createReference(workspace, { projectId: 'p1', tags: ['x'.repeat(65)] }), /at most 64/);
 });
 
-test('workspace version 2 requires explicit capture settings', () => {
+test('workspace version 3 requires explicit capture settings', () => {
   const original = createWorkspace();
-  assert.equal(original.version, 2);
+  assert.equal(original.version, 3);
   assert.deepEqual(original.settings, { automaticWebsiteCapture: true });
   const disabled = updateWorkspaceSettings(original, { automaticWebsiteCapture: false });
   assert.equal(disabled.settings.automaticWebsiteCapture, false);

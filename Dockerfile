@@ -16,7 +16,7 @@ ENV DISPLAY=:99
 COPY LICENSE README.md mcp-server.mjs server.mjs ./
 COPY migrations ./migrations
 COPY public ./public
-COPY scripts/init-bucket.mjs scripts/check-browser.mjs scripts/run-with-xvfb.mjs ./scripts/
+COPY scripts/visparse-bridge.py scripts/init-bucket.mjs scripts/check-browser.mjs scripts/run-with-xvfb.mjs ./scripts/
 COPY src ./src
 
 USER node

@@ -1,0 +1,20 @@
+#!/usr/bin/env node
+// Explicit offline Visparse command wrapper. Never calls a model or network.
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { profile } from './analysis-profile.mjs';
+let input = '';
+for await (const chunk of process.stdin) input += chunk;
+const request = JSON.parse(input);
+if (request.command !== 'analyze-design' || request.image_paths.length !== 1) process.exit(2);
+const bytes = await readFile(request.image_paths[0]);
+const result = profile(createHash('sha256').update(bytes).digest('hex'));
+if (process.env.DATABASE_URL || process.env.REFLOOM_S3_SECRET_ACCESS_KEY) process.exit(3);
+const mode = process.env.ANALYSIS_FIXTURE_MODE;
+if (mode === 'identity') result.sources[0].locator = 'file:sha256:' + '0'.repeat(64);
+if (mode === 'schema') result.schema_version = '99';
+if (mode === 'measurement') result.measurements = [{ id: 'm1', source_id: 'reference-1', name: 'width', value: 1, method: 'invented' }];
+if (mode === 'failure') { process.stderr.write('private diagnostic: do not expose'); process.exit(1); }
+if (mode === 'timeout') await new Promise(resolve => setTimeout(resolve, 10000));
+if (mode === 'oversize') process.stdout.write('x'.repeat(2 * 1024 * 1024));
+else process.stdout.write(JSON.stringify(result));

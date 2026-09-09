@@ -1,8 +1,10 @@
 import { createWorkspace, importWorkspace, validateWorkspace } from './domain.js';
 
+import { interruptRestoredAnalyses } from './reference-analysis.js';
+
 export const BLOB_PREFIX = 'blob:';
 export const BACKUP_FORMAT = 'refloom.workspace-backup';
-export const BACKUP_VERSION = 3;
+export const BACKUP_VERSION = 4;
 
 export class RevisionConflictError extends Error {
   constructor(message = 'This workspace changed in another process. The latest version has been reloaded; review your change and try again.') { super(message); this.name = 'RevisionConflictError'; }
@@ -115,9 +117,13 @@ export function encodeBackup(workspace, binaries = []) {
 export function decodeBackup(text) {
   let value;
   try { value = JSON.parse(text); } catch { throw new TypeError('Backup is not valid JSON'); }
-  if (!value || value.version !== BACKUP_VERSION) throw new TypeError('Unsupported Refloom backup version');
+  if (!value || ![3, BACKUP_VERSION].includes(value.version)) throw new TypeError('Unsupported Refloom backup version');
   if (value.format !== BACKUP_FORMAT || !Array.isArray(value.binaries)) throw new TypeError('Unsupported Refloom backup');
-  const workspace = clonedWorkspace(value.workspace);
+  if (value.version === 3) {
+    if (value.workspace?.version !== 2 || value.workspace.references?.some(r => r.analyses !== undefined)) throw new TypeError('Unsupported version-3 workspace');
+    value.workspace.version = 3;
+  }
+  const workspace = interruptRestoredAnalyses(clonedWorkspace(value.workspace));
   const required = referencedBlobIds(workspace);
   const seen = new Set();
   const binaries = [];
@@ -163,6 +169,14 @@ export class WorkspaceRepository {
     const value = await (await this.#request('/api/workspace')).json();
     this.revision = value.revision;
     return importWorkspace(value.workspace);
+  }
+
+  async requestAnalysis(value) {
+    return (await this.#request('/api/analyses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) })).json();
+  }
+  async analyses(referenceId) { return (await this.#request(`/api/references/${encodeURIComponent(referenceId)}/analyses`)).json(); }
+  async analysis(referenceId, analysisId, cancel = false) {
+    return (await this.#request(`/api/references/${encodeURIComponent(referenceId)}/analyses/${encodeURIComponent(analysisId)}`, { method: cancel ? 'DELETE' : 'GET' })).json();
   }
 
   async captureWebsite(referenceId, settings = {}) {

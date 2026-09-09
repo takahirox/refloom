@@ -1,3 +1,5 @@
+import { AnalysisService } from './src/analysis-service.js';
+import { createVisparseRunner } from './src/visparse-runner.js';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -59,7 +61,11 @@ function trustedRequest(request) {
   catch { return false; }
 }
 
-async function api(request, response, pathname, store, captureScheduler) {
+async function api(request, response, pathname, store, captureScheduler, analysisService) {
+  if (pathname === '/api/analyses' && request.method === 'POST') return json(response, 202, await analysisService.request(await body(request, 2048)));
+  const analysisRoute = pathname.match(/^\/api\/references\/([A-Za-z0-9_-]{1,128})\/analyses(?:\/([A-Za-z0-9_-]{1,128}))?$/);
+  if (analysisRoute && request.method === 'GET') return json(response, 200, analysisRoute[2] ? await analysisService.get(analysisRoute[1], analysisRoute[2]) : await analysisService.list(analysisRoute[1], { limit: 32 }));
+  if (analysisRoute?.[2] && request.method === 'DELETE') return json(response, 200, await analysisService.cancel(analysisRoute[1], analysisRoute[2]));
   if (pathname === '/api/workspace' && request.method === 'GET') return json(response, 200, await store.load());
   if (pathname === '/api/workspace' && request.method === 'PUT') {
     const value = await body(request);
@@ -156,6 +162,10 @@ async function openStream(filename) {
 }
 
 function apiFailure(error) {
+  if (/^ANALYSIS_[A-Z_]+$/.test(error?.code)) {
+    const status = error.code === 'ANALYSIS_NOT_FOUND' ? 404 : ['ANALYSIS_BUSY', 'ANALYSIS_HISTORY_FULL'].includes(error.code) ? 429 : error.code === 'ANALYSIS_UNAVAILABLE' ? 503 : 400;
+    return { status, headers: {}, value: { error: error.code, code: error.code } };
+  }
   const statuses = {
     REVISION_CONFLICT: 409,
     PERSISTENCE_NOT_FOUND: 404,
@@ -177,6 +187,7 @@ export function createRefloomServer(options = {}) {
     ? createPersistenceRepository({ env: options.env ?? process.env })
     : { repository: options.store, cleanupIntervalMs: options.cleanupIntervalMs ?? 3_600_000 };
   const store = persistence.repository;
+  const analysisService = options.analysisService ?? new AnalysisService({ store, runner: options.analysisRunner ?? createVisparseRunner(options.env ?? process.env) });
   const captureReference = options.captureReference ?? defaultCaptureReference;
   const captureScheduler = options.captureScheduler ?? new CaptureScheduler({
     store,
@@ -236,7 +247,7 @@ export function createRefloomServer(options = {}) {
         return;
       }
       try {
-        await api(request, response, url.pathname, store, captureScheduler);
+        await api(request, response, url.pathname, store, captureScheduler, analysisService);
       } catch (error) {
         const failure = apiFailure(error);
         send(response, failure.status, JSON.stringify(failure.value), { 'Content-Type': 'application/json; charset=utf-8', ...failure.headers });
@@ -307,11 +318,13 @@ export function createRefloomServer(options = {}) {
     initialization: { value: initialization },
     initializationState: { get: () => initializationState },
     captureScheduler: { value: captureScheduler },
+    analysisService: { value: analysisService },
     repositoryClosed: { get: () => repositoryClose }
   });
   server.once('close', () => {
     if (cleanupTimer !== undefined) clock.clearInterval(cleanupTimer);
     repositoryClose ??= Promise.resolve()
+      .then(() => analysisService.close())
       .then(() => captureScheduler.close())
       .then(() => store.close());
     repositoryClose.catch(() => {});

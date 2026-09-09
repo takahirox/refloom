@@ -1,6 +1,7 @@
+import { validateAnalyses } from './reference-analysis.js';
 import { isCanonicalReferenceTags, normalizeReferenceTags } from './reference-tags.js';
 
-export const WORKSPACE_VERSION = 2;
+export const WORKSPACE_VERSION = 3;
 export const CREATIVE_DIRECTION_VERSION = 2;
 export const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({ automaticWebsiteCapture: true });
 
@@ -207,7 +208,7 @@ export function exportCreativeDirection(workspace, boardId) {
     return {
       selection: copy(selection), target: copy(target),
       moment: selection.momentId ? copy(need(workspace, 'moments', selection.momentId)) : null,
-      reference: copy(reference), asset: target.assetId ? copy(need(workspace, 'assets', target.assetId)) : null
+      reference: copy(Object.fromEntries(Object.entries(reference).filter(([key]) => key !== 'analyses'))), asset: target.assetId ? copy(need(workspace, 'assets', target.assetId)) : null
     };
   });
   return { format: 'refloom.creative-direction', version: CREATIVE_DIRECTION_VERSION, exportedAt: now(), project: copy(project), board: copy(board), selections };
@@ -292,6 +293,7 @@ export function validateWorkspace(workspace) {
     stringField(x, 'capturedAt', path);
     stringField(x, 'captureMethod', path);
     for (const field of ['title', 'sourceUrl', 'creator', 'notes']) optionalString(x, field, path);
+    try { validateAnalyses(x, workspace); } catch { issues.push({ path: `${path}.analyses`, message: 'invalid derived analysis attachments' }); }
     if (!isCanonicalReferenceTags(x.tags)) issues.push({ path: `${path}.tags`, message: 'must be a canonical unique Reference tag array' });
   });
   workspace.assets.forEach((x, i) => {

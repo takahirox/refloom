@@ -100,16 +100,16 @@ tags do not replace or derive a Selection's project-specific Aspect or Intent.
 This is a direction artifact, not a restorable workspace: entities unrelated to
 the selected board and captured binary bytes are intentionally absent.
 
-## `refloom.workspace-backup` version 3
+## `refloom.workspace-backup` version 4
 
 This restore format contains:
 
 - `format`: exactly `refloom.workspace-backup`.
-- `version`: exactly `3`.
-- `workspace`: workspace version 2 with boolean
+- `version`: exactly `4`.
+- `workspace`: workspace version 3 with boolean
   `settings.automaticWebsiteCapture` and arrays named `projects`, `references`,
   `assets`, `targets`, `moments`, `selections`, `boards`, and `signals`. Every
-  Reference carries its canonical `tags` array.
+  Reference carries its canonical `tags` array and may include bounded `analyses` attachments.
 - `binaries`: records with exactly `id`, MIME `type`, original `name`, byte
   `size`, lowercase `sha256`, and canonical base64 `data`. Every asset locator
   `blob:<id>` must have one matching binary record and no orphan is allowed.
@@ -117,9 +117,9 @@ This restore format contains:
 ```json
 {
   "format": "refloom.workspace-backup",
-  "version": 3,
+  "version": 4,
   "workspace": {
-    "version": 2,
+    "version": 3,
     "settings": {
       "automaticWebsiteCapture": true
     },
@@ -150,7 +150,7 @@ can be imported; the binary is shown only to document the record shape.
 
 ## Compatibility rules
 
-- Optional entity fields may be absent, but workspace version 2 References must
+- Optional entity fields may be absent, but workspace version 3 References must
   carry canonical `tags`; readers must not synthesize missing required fields or
   derive missing provenance.
 - Refloom validates relationship integrity and rejects malformed JSON,
@@ -160,14 +160,24 @@ can be imported; the binary is shown only to document the record shape.
   envelopes are rejected. There is no automatic browser/file-store migration. Producers introducing
   an incompatible shape must increment the relevant version; format names do
   not change for compatible revisions.
-- The version-3 cutover requires a reset PostgreSQL database; pre-cutover
-  database contents and old backups are not upgraded.
+- The version-4 analysis upgrade adds SQL storage without resetting existing rows.
+  Backup version 3 with workspace version 2 upgrades deterministically to workspace
+  version 3, retaining all existing IDs, settings, tags, relationships and media.
+  Restored running analyses become interrupted failures; restore never resumes a job.
 - Consumers should ignore unknown additive fields, but must not interpret that
   as permission to accept an unknown version.
 - Importing a valid backup replaces the current authoritative workspace. Direction JSON
   cannot be imported as a backup.
-- Workspace version 2 accurately retains project-owned References. A future move to
+- Workspace version 3 accurately retains project-owned References. A future move to
   workspace-level reusable References requires a new workspace/domain major
   version and the deterministic backup migration, stable-ID/media preservation,
   reuse semantics, relationship validation, rollback/export, mixed-version
   rejection, and tests specified in `PRODUCT_SPEC.md`.
+
+Analysis attachment version 1 stores one Visparse Design Profile with its input
+Asset identity/hash, source mapping, intent, configuration identity, producer,
+Visparse version/fingerprint, timestamps and status. Successful canonical results
+are retained in workspace backups. Creative-direction version 2 deliberately omits
+analysis attachments; use the bounded live analysis APIs for selected results.
+Imported results remain untrusted derived data, not verified execution attestations.
+See [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md) for limits and lifecycle.
