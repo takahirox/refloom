@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import test from 'node:test';
-import { captureWebsite } from '../src/chrome-capture.js';
+import { captureWebsite } from '../../src/chrome-capture.js';
 
 const fixtures = new URL('./fixtures/', import.meta.url);
 

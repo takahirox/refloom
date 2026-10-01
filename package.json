@@ -8,10 +8,10 @@
     "mcp": "node mcp-server.mjs",
     "check:browser": "node scripts/check-browser.mjs",
     "test": "node --test test/*.test.js",
-    "test:integration": "node scripts/run-integration.mjs",
-    "test:integration:container": "npm run check:browser && node --test integration/*.integration.js",
+    "test:integration": "node scripts/test-integration.mjs",
+    "test:integration:container": "npm run check:browser && node --test test/integration/*.integration.test.js",
     "check": "node scripts/check.mjs",
-    "test:analysis": "node --test integration/visparse.integration.mjs"
+    "test:analysis": "node --test test/visparse.integration.mjs"
   },
   "engines": {
     "node": ">=22"

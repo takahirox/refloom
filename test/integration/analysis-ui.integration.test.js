@@ -5,11 +5,11 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createRefloomServer } from '../server.mjs';
-import { findChrome, connectChromeCdp } from '../src/chrome-capture.js';
+import { createRefloomServer } from '../../server.mjs';
+import { findChrome, connectChromeCdp } from '../../src/chrome-capture.js';
 import { MemoryStore } from '../fixtures/analysis-store.mjs';
 import { profile, png } from '../fixtures/analysis-profile.mjs';
-import { digest } from '../src/visparse-runner.js';
+import { digest } from '../../src/visparse-runner.js';
 
 test('browser can request, inspect and reuse analysis; derived text is never HTML', { timeout: 30000 }, async t => {
   const store = new MemoryStore(); let calls = 0;

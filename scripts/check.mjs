@@ -49,11 +49,11 @@ const required = [
   'test/capture-proxy.test.js',
   'test/chrome-capture.test.js',
   'test/interactive-auto.test.js',
-  'integration/fixtures/webgl-passive.html',
-  'integration/webgl-capture.integration.js',
+  'test/integration/fixtures/webgl-passive.html',
+  'test/integration/webgl-capture.integration.test.js',
   'test/capture-scheduler.test.js',
   'test/website-capture-service.test.js',
-  'integration/persistence.integration.js',
+  'test/integration/persistence.integration.test.js',
   'test/domain.test.js',
   'test/storage.test.js',
   'test/create-persistence-repository.test.js',
@@ -68,7 +68,7 @@ const required = [
   'scripts/check.mjs',
   'scripts/check-browser.mjs',
   'scripts/init-bucket.mjs',
-  'scripts/run-integration.mjs'
+  'scripts/test-integration.mjs'
 ];
 
 for (const file of required) {
@@ -115,10 +115,10 @@ for (const [label, pattern] of forbidden) if (pattern.test(`${html}\n${app}`)) {
 }
 
 const persistenceSources = await Promise.all([
-  'server.mjs', 'mcp-server.mjs', 'src', 'test', 'integration', 'fixtures'
+  'server.mjs', 'mcp-server.mjs', 'src', 'test'
 ].map(async entry => {
   const absolute = path.join(root, entry);
-  const files = ['src', 'test', 'integration', 'fixtures'].includes(entry) ? await modules(absolute) : [absolute];
+  const files = entry === 'src' || entry === 'test' ? await modules(absolute) : [absolute];
   return Promise.all(files.map(file => readFile(file, 'utf8')));
 }));
 const removedPersistence = [

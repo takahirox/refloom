@@ -311,7 +311,7 @@ test('HTTP/UI and MCP public result contract includes the same bounded auto summ
 
 test('deterministic local WebGL fixture performs rendering without input handlers', async () => {
   const fixture = await readFile(
-    new URL('../integration/fixtures/webgl-passive.html', import.meta.url),
+    new URL('./integration/fixtures/webgl-passive.html', import.meta.url),
     'utf8'
   );
   assert.match(fixture, /getContext\('webgl2'/);

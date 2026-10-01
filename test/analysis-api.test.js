@@ -3,9 +3,9 @@ import test from 'node:test';
 import { once } from 'node:events';
 import { createRefloomServer } from '../server.mjs';
 import { createMcpServer } from '../mcp-server.mjs';
-import { MemoryStore } from '../fixtures/analysis-store.mjs';
+import { MemoryStore } from './fixtures/analysis-store.mjs';
 import { digest } from '../src/visparse-runner.js';
-import { profile, png } from '../fixtures/analysis-profile.mjs';
+import { profile, png } from './fixtures/analysis-profile.mjs';
 
 test('HTTP requests analysis; MCP discovers and reads it without another invocation', async t => {
   const store = new MemoryStore(); let calls = 0;

@@ -50,13 +50,8 @@ npm run check:browser
 npm run mcp
 ```
 
-`npm test` and Fleet's `node --test` run the fast suite in `test/`.
-Integration suites live in `integration/` and shared fixtures in `fixtures/`
-so automatic test discovery does not start external services or command wrappers.
-`npm run test:integration` creates isolated PostgreSQL/MinIO volumes, verifies
-the production path, and always removes them. The optional Visparse suite runs
-separately with `npm run test:analysis`; see
-[reference analysis](docs/REFERENCE_ANALYSIS.md#persistence-and-verification).
+`npm test` is the fast suite. `npm run test:integration` creates isolated
+PostgreSQL/MinIO volumes, verifies the production path, and always removes them.
 
 ## Codex MCP setup
 
