@@ -60,9 +60,6 @@ class BoundedRunner:
 
 def main():
     import visparse
-    from visparse.agent_config import AnalyzerConfig
-    from visparse.design import CodexDesignAnalyzer, run_design_analyzer, normalize_design_profile
-    from visparse.model import SourceEvidence, MAX_INPUT_BYTES
 
     # Package releases currently share 0.1.0; bind reuse to the installed code too.
     root = pathlib.Path(visparse.__file__).parent
@@ -84,6 +81,17 @@ def main():
     if len(raw) > 2 * 1024 * 1024:
         raise ValueError('input limit')
     request = json.loads(raw)
+    if isinstance(request, dict) and request.get('product') == 'visparse.inspection':
+        from visparse.inspection import inspect_snapshot, normalize_inspection
+        if set(request) != {'product', 'bundle'}:
+            raise ValueError('invalid inspection transport')
+        # Use the bounded JSON entry point and the real applicable contract.
+        result = inspect_snapshot(json.dumps(request['bundle'], ensure_ascii=False, separators=(',', ':'), allow_nan=False))
+        print(json.dumps({'version': identity, 'result': json.loads(normalize_inspection(result))}, ensure_ascii=False, separators=(',', ':')))
+        return
+    from visparse.agent_config import AnalyzerConfig
+    from visparse.design import CodexDesignAnalyzer, run_design_analyzer, normalize_design_profile
+    from visparse.model import SourceEvidence, MAX_INPUT_BYTES
     if not isinstance(request, dict) or set(request) != {'image', 'config', 'intent'}:
         raise ValueError('invalid transport')
     data = base64.b64decode(request['image'], validate=True)

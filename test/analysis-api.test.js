@@ -6,6 +6,7 @@ import { createMcpServer } from '../mcp-server.mjs';
 import { MemoryStore } from './fixtures/analysis-store.mjs';
 import { digest } from '../src/visparse-runner.js';
 import { profile, png } from './fixtures/analysis-profile.mjs';
+import { capturedEvidence } from './fixtures/inspection-evidence.mjs';
 
 test('HTTP requests analysis; MCP discovers and reads it without another invocation', async t => {
   const store = new MemoryStore(); let calls = 0;
@@ -40,4 +41,34 @@ test('HTTP requests analysis; MCP discovers and reads it without another invocat
   assert.equal(wrongReference.structuredContent.error.code, 'ANALYSIS_NOT_FOUND');
   const badLimit = await call('list_reference_analyses', { referenceId: 'r', limit: 1000 });
   assert.equal(badLimit.isError, true);
+});
+
+test('HTTP and MCP share inspection requests and explicit unsupported/no-evidence outcomes', async t => {
+  const store = capturedEvidence(new MemoryStore()); let calls = 0;
+  const runner = { enabled: true, configuration: 'fixture', timeoutMs: 10000, info: async () => ({ version: 'fixture' }),
+    inspect: async bundle => { calls++; return { version: 'fixture', result: bundle }; }, analyze: () => assert.fail('No model call') };
+  const server = createRefloomServer({ store, analysisRunner: runner });
+  const mcp = createMcpServer({ store, analysisRunner: runner, diagnostics: { write() {} } });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening'); await server.initialization;
+  t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); await server.repositoryClosed; await mcp.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const post = value => fetch(`${origin}/api/analyses`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+  const args = { referenceId: 'r', assetId: 'a', product: 'visparse.inspection', momentId: 'm' };
+  const response = await post(args); assert.equal(response.status, 202);
+  const job = await response.json(); assert.equal(job.result, undefined);
+  await Promise.all([...server.analysisService.jobs.values()].map(j => j.promise));
+  const call = (name, args) => mcp.handle({ method: 'tools/call', params: { name, arguments: args } });
+  const repeated = await call('request_reference_analysis', args);
+  assert.equal(repeated.structuredContent.reused, true); assert.equal(calls, 1);
+  const detail = await call('get_reference_analysis', { referenceId: 'r', analysisId: job.id });
+  assert.equal(detail.structuredContent.result.captures[1].payload.moment.id, 'm');
+  const tools = await mcp.handle({ method: 'tools/list' });
+  assert.ok(tools.tools.find(t => t.name === 'request_reference_analysis').inputSchema.properties.product.enum.includes('visparse.inspection'));
+  const unsupported = await post({ ...args, product: 'visparse.interaction-profile' });
+  assert.equal(unsupported.status, 400);
+  assert.equal((await unsupported.json()).code, 'ANALYSIS_UNSUPPORTED_INTERACTION_EVIDENCE');
+  store.workspace.moments[0].state = {};
+  const missing = await call('request_reference_analysis', args);
+  assert.equal(missing.structuredContent.error.code, 'ANALYSIS_NO_RUNTIME_EVIDENCE');
+  assert.equal(calls, 1);
 });

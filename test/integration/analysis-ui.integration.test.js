@@ -10,11 +10,13 @@ import { findChrome, connectChromeCdp } from '../../src/chrome-capture.js';
 import { MemoryStore } from '../fixtures/analysis-store.mjs';
 import { profile, png } from '../fixtures/analysis-profile.mjs';
 import { digest } from '../../src/visparse-runner.js';
+import { capturedEvidence } from '../fixtures/inspection-evidence.mjs';
 
 test('browser can request, inspect and reuse analysis; derived text is never HTML', { timeout: 30000 }, async t => {
-  const store = new MemoryStore(); let calls = 0;
+  const store = capturedEvidence(new MemoryStore()); let calls = 0, inspections = 0;
   const runner = { enabled: true, configuration: 'fixture', timeoutMs: 10000, info: async () => ({ version: 'fixture' }),
-    analyze: async () => { calls++; const result = profile(digest(png)); result.observations[0].statement = '<img src=x onerror="window.analysisInjected=true">'; return { version: 'fixture', result }; } };
+    analyze: async () => { calls++; const result = profile(digest(png)); result.observations[0].statement = '<img src=x onerror="window.analysisInjected=true">'; return { version: 'fixture', result }; },
+    inspect: async bundle => { inspections++; return { version: 'fixture', result: bundle }; } };
   const server = createRefloomServer({ store, analysisRunner: runner });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); await server.initialization;
   t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); await server.repositoryClosed; });
@@ -45,6 +47,17 @@ test('browser can request, inspect and reuse analysis; derived text is never HTM
   await cdp.evaluate("[...document.querySelectorAll('.analysis-dialog button')].find(b => b.textContent === 'Analyze selected image').click()");
   await new Promise(r => setTimeout(r, 300));
   assert.equal(calls, 1);
+  await cdp.evaluate("const product = document.querySelector('[aria-label=\"Analysis product\"]'); product.value='visparse.inspection'; product.dispatchEvent(new Event('change')); document.querySelector('[aria-label=\"Capture provenance to inspect\"]').value='m'");
+  assert.equal(await cdp.evaluate("document.querySelector('[aria-label=\"Analysis purpose\"]').hidden"), true);
+  await cdp.evaluate("[...document.querySelectorAll('.analysis-dialog button')].find(b => b.textContent === 'Inspect stored capture').click()");
+  await until("[...document.querySelectorAll('.analysis-entry')].some(e => e.textContent.includes('visparse.inspection') && e.textContent.includes('complete'))");
+  await cdp.evaluate("[...document.querySelectorAll('.analysis-entry')].find(e => e.textContent.includes('visparse.inspection')).querySelector('button').click()");
+  await until("document.querySelector('.analysis-dialog')?.textContent.includes('Validated supplied evidence: screenshot, runtime, canvas, webgl')");
+  assert.equal(await cdp.evaluate("document.querySelector('[aria-label=\"Capture provenance to inspect\"]').value"), 'm');
+  assert.equal(await cdp.evaluate("JSON.parse(document.querySelector('.analysis-output').textContent).input.evidence.moment.id"), 'm');
+  await cdp.evaluate("[...document.querySelectorAll('.analysis-dialog button')].find(b => b.textContent === 'Inspect stored capture').click()");
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal(inspections, 1); assert.equal(calls, 1);
   await cdp.evaluate("[...document.querySelectorAll('.analysis-dialog button')].find(b => b.textContent === 'Close').click()");
   await until("!document.querySelector('.analysis-dialog')");
 });

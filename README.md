@@ -213,6 +213,9 @@ and limits are in [docs/WEBSITE_CAPTURE.md](docs/WEBSITE_CAPTURE.md).
 
 Use **More → Analysis** on a Reference to analyze one saved PNG/JPEG with Visparse,
 view derived results beside the original evidence, and reuse them through UI/MCP.
+Choose **Stored runtime inspection** to validate preserved browser capture metadata
+for an Asset or exact Moment without a model call. Passive Moments and guided
+logs do not supply a supported action/transition analysis sequence.
 Analysis is manual and disabled until configured; capture and stored-result reads
 remain independent of it. The tested execution placement is a host Node/Python
 installation. The stock Compose image leaves analysis disabled. See

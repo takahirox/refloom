@@ -69,17 +69,23 @@ export function createVisparseRunner(env = process.env) {
     && (!config.model || /^\S+$/.test(config.model))
     && ['codex', 'command'].includes(config.agent) && (config.agent !== 'command' || !!config.executable);
   return {
-    enabled: enabled && valid, timeoutMs: (valid ? timeout : 300) * 1000 + 10000,
+    enabled: enabled && valid, inspectionEnabled: enabled, timeoutMs: (valid ? timeout : 300) * 1000 + 10000,
     configuration: digest(JSON.stringify({ adapter: 'refloom.visparse/1', python, config, inherited })),
+    inspectionConfiguration: digest(JSON.stringify({ adapter: 'refloom.inspection/1', python })),
     settings: { adapter: 'refloom.visparse/1', timeoutSeconds: timeout, estimateGeometry: false, semanticExtraction: false, targetInputs: false },
     async info() {
-      if (!enabled || !valid) throw analysisError('ANALYSIS_UNAVAILABLE');
+      if (!enabled) throw analysisError('ANALYSIS_UNAVAILABLE');
       return runBridge({ python, args: ['info'], env: childEnv, timeout: 10000 });
     },
     async analyze(contents, intent, signal) {
       if (!enabled || !valid) throw analysisError('ANALYSIS_UNAVAILABLE');
       return runBridge({ python, env: childEnv, signal, timeout: timeout * 1000 + 10000,
         input: JSON.stringify({ image: contents.toString('base64'), intent, config }) });
+    },
+    async inspect(bundle, signal) {
+      if (!enabled) throw analysisError('ANALYSIS_UNAVAILABLE');
+      return runBridge({ python, env: childEnv, signal, timeout: 10000,
+        input: JSON.stringify({ product: 'visparse.inspection', bundle }) });
     },
     producer: { agent: config.agent, requestedModel: config.model ?? null, resolvedModel: null }
   };

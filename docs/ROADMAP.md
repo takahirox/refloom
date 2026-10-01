@@ -55,7 +55,10 @@ require a new privacy, authorization, retention, and operations design.
 Optional provider integrations for enrichment or synthesis, with provenance,
 consent, cost, model disclosure, data-boundary controls, and useful non-AI
 fallbacks. The optional Visparse integration sends selected image evidence only on explicit
-analysis requests after operator configuration; see [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md).
+analysis requests after operator configuration. Deterministic supplied runtime
+inspection reuses that lifecycle without a model call. Full interaction profiles
+remain blocked on separately scoped, authorized session/interval and per-action
+before/after capture; see [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md).
 
 ## Future: legal and copyright policy
 

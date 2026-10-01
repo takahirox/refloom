@@ -10,16 +10,91 @@ The default purpose is `preserve`; `adapt` provides reference-derived principles
 without a target site. Neither setting is inferred from a Selection's free-text
 Intent. This slice analyzes the complete Asset bytes, with no crop, resize,
 geometry estimation, target inputs or second semantic-extraction call. Uploaded
-and website-captured images use the same path, including full-page/section images
-as qualitative screenshots. DOM/CSS, accessibility, runtime, video, SVG, animation,
-action sequences and inferred geometry are not supported. The input signature and
+and website-captured images use the same design-profile path, including full-page/section images
+as qualitative screenshots. This product does not analyze DOM/CSS, accessibility,
+runtime, video, SVG, animation, action sequences or inferred geometry. The input signature and
 declared MIME must agree. Image decoding/interpretation remains Visparse's job;
 the signature check does not establish that an image is decodable.
 
-Runtime/interaction evidence mapping is tracked in
-[#31](https://github.com/takahirox/refloom/issues/31). Design DNA, rendered DESIGN.md,
+Issue [#31](https://github.com/takahirox/refloom/issues/31) also supports
+**Stored runtime inspection** in the same dialog and durable lifecycle. Select an
+image Asset and either its original capture provenance or a particular stored
+Moment. Click **Inspect stored capture**. This invokes Visparse's deterministic
+`inspect_snapshot`/`normalize_inspection` contract, not an AI analyzer. The result
+is a validated supplied-evidence bundle (`visparse.inspection`, schema `0.1`),
+not a Design Profile or an inferred interaction/UX profile.
+
+Design DNA, rendered DESIGN.md,
 multi-image/target analysis, automatic triggering, hosted/team execution and
 workspace-level Reference ownership are outside this integration.
+
+## Stored evidence mapping and gaps
+
+The mapping was checked against Refloom's `website-capture-service.js`,
+`interactive-auto.js` and `guided-executor.js`, and the reviewed Visparse revision's
+[`inspection.py`](https://github.com/takahirox/visparse/blob/5a4166dd37e65ca368ab9521eab4be52ceeda74f/src/visparse/inspection.py),
+[`inspection contract`](https://github.com/takahirox/visparse/blob/5a4166dd37e65ca368ab9521eab4be52ceeda74f/docs/inspection.md), and
+[`interaction contract`](https://github.com/takahirox/visparse/blob/5a4166dd37e65ca368ab9521eab4be52ceeda74f/docs/interactions.md).
+`src/inspection-evidence.js` is the explicit mapping boundary.
+
+| Stored Refloom evidence | Visparse inspection mapping | Scope and limits |
+| --- | --- | --- |
+| One PNG/JPEG blob | `screenshot` capture `reference-1` | Exact Asset ID, immutable blob locator, actual SHA-256, MIME and original Asset provenance. Bytes remain an independently retrievable artifact; inspection does not send them to a provider. |
+| Automated-browser Asset provenance or selected Moment state | `runtime` capture `runtime-1` | Raw viewport/scroll/region, URLs, capture time, checkpoint, sampling/stability settings, warnings, completion, surface discovery and automation metadata are retained as opaque supplied JSON. No new collection occurs. |
+| Stored `targetCanvas` | `canvas` capture `canvas-1` | Supplied surface identity, bounds and instrumentation metadata. A selector/bounds record is not a DOM snapshot or CSS inventory. |
+| `targetCanvas.webglContext === true` and `supported === true` | `webgl` capture `webgl-1` | Generic observed context/draw-call metadata only. It does not imply renderer resources, an application state model or a Three.js scene. Unsupported frame/worker discovery remains raw metadata and warnings. |
+| Passive representative Moments | No interaction sequence | Visual samples do not establish actions, transitions, causality or exhaustive animation coverage. |
+| Guided action log | Retained inside runtime metadata only | Ordered click targets, requested roles/labels, relative start timestamps, outcomes and policy reasons are preserved, without treating `executed` as an observed application effect. |
+| DOM, computed/matched CSS, accessibility tree, Three.js scene inventory | Unavailable | Capture may internally inspect elements or instrument WebGL, but it does not durably retain these contracts' inventories. No captures of these kinds are synthesized. |
+
+Inspection requires stored `captureMethod: automated-browser`, viewport metadata
+and capture timestamp. Uploaded images with no such runtime evidence return
+`ANALYSIS_NO_RUNTIME_EVIDENCE`. Missing/foreign Moments, unsupported image formats,
+oversized inputs and invalid source ownership return `ANALYSIS_UNSUPPORTED_EVIDENCE`.
+The actual image signature and digest are checked before Visparse preflight;
+if a stored screenshot digest disagrees, the request returns `ANALYSIS_STALE_INPUT`.
+The existing image Design Profile path remains available for uploaded images.
+
+Asset deduplication preserves the first Asset's provenance while later captures
+create separate Targets/Moments. A selected Moment's state is therefore the sole
+authority for that capture's runtime metadata: it is never merged with earlier
+Asset provenance. Without `momentId`, inspection deliberately describes the
+Asset's original capture. Each attachment snapshots the Reference identity and
+source fields, Asset identity/provenance and, when selected, the complete
+Target/Moment. The snapshot digest, actual image digest, scope, product,
+mapping configuration and installed Visparse fingerprint bind reuse. Changes to
+this evidence mark the stored result stale and reject late completion. Tag edits
+and design-provider/model configuration do not invalidate deterministic inspection.
+Snapshot object-key order is insignificant, including after PostgreSQL JSONB reload.
+
+Inspection preserves payloads without generating prose or promoting values into
+claims: `measurements`, `runtime_observations`, `visual_observations`,
+`interpretations` and `confidence` are empty. Raw numerical metadata remains
+available for an authorized consumer to examine in its original context. In
+particular, scheduled sample timestamps and visual-difference scores are not
+measured response times or inferred UX pacing. Missing evidence stays explicitly
+unavailable. This path validates and exposes supplied evidence; it does not claim
+that runtime or UX interpretation was performed. The result must match the exact
+mapped input after real Visparse validation; offline imports check that same
+bounded mapping and remain untrusted supplied evidence.
+
+`product: visparse.interaction-profile` returns
+`ANALYSIS_UNSUPPORTED_INTERACTION_EVIDENCE` before any analyzer or browser call,
+for both passive and guided captures. Unsupported/no-evidence requests create no
+analysis attachment. The current guided executor runs actions before screenshot
+sampling, records action start times without completion intervals, and does not
+retain per-action pre/post snapshots or a common capture/action clock. Capture
+and analysis authorizations remain independent; inspection never runs guided
+actions, recaptures a URL or invokes Visparse's optional browser collector.
+
+Separate future capture work would need durable session/reset/storage and input
+modality records, monotonic clock identity, non-atomic capture intervals, action
+start/end intervals, target-to-capture identities, and explicitly bound per-action
+before/feedback/after evidence to support `interaction-sequence/0.2`. Merely
+filling required fields with defaults or treating scheduled timestamps as observed
+intervals would fabricate evidence. Supporting DOM/CSS/AX or cooperative Three.js
+would similarly require separately authorized inventory capture. None of those
+capabilities is added by this bridge.
 
 ## Enable on the host
 
@@ -56,6 +131,12 @@ images, analyses or backups. `REFLOOM_VISPARSE_EXECUTABLE` and
 `REFLOOM_VISPARSE_MODEL` are optional operator overrides passed through Visparse's
 configuration. An omitted model means the agent's default; `resolvedModel: null`
 means the actual model was not reported, not a claim that it matches a guess.
+
+These provider requirements apply to Design Profiles. Runtime inspection needs
+only `REFLOOM_ANALYSIS_ENABLED=1` and the reviewed Python/Visparse installation;
+it requires no provider installation, authentication or valid provider settings.
+List responses report `enabled` for image analysis and `inspectionEnabled` for
+inspection separately. Reads require neither.
 
 An explicitly trusted wrapper can use `REFLOOM_VISPARSE_AGENT=command` with an
 absolute `REFLOOM_VISPARSE_EXECUTABLE` implementing Visparse's
@@ -111,6 +192,8 @@ report `ANALYSIS_INTERRUPTED` after that deadline and the lease no longer consum
 capacity. Graceful shutdown aborts its own jobs. Another process can cancel through
 the shared revision boundary; the owner checks approximately once per second.
 Private temporary images are removed on success, error, timeout and cancellation.
+Deterministic inspection instead uses a fixed 10-second process bound and
+25-second lease, with the same interruption/cancellation behavior.
 An abrupt OS/process crash can leave a private temporary directory for normal OS
 temporary-file cleanup; it never becomes the result's durable evidence locator.
 
@@ -119,7 +202,8 @@ conflicts retry only the persistence operation, never the model call. Deleting a
 Reference/project or resetting/replacing the workspace removes owned attachments;
 a late completion cannot recreate them. Restore interrupts running attachments
 instead of resuming jobs. Existing successes remain readable when configuration
-changes or Visparse becomes unavailable. Summaries identify changed Asset locators;
+changes or Visparse becomes unavailable. Summaries identify changed Asset locators
+and changed inspection snapshots;
 consumers compare stored configuration/version/intent before reuse. Explicit new
 requests perform that comparison using the current installed code and byte digest.
 
@@ -127,7 +211,7 @@ requests perform that comparison using the current installed code and byte diges
 
 HTTP uses the existing local Host/Origin/JSON boundary:
 
-- `POST /api/analyses` with `{referenceId, assetId, intent?, force?}` returns a
+- `POST /api/analyses` with `{referenceId, assetId, product?, momentId?, intent?, force?}` returns a
   run summary/provenance with HTTP 202. No result body is included in this response.
 - `GET /api/references/:referenceId/analyses` returns at most 32 summaries.
 - `GET /api/references/:referenceId/analyses/:analysisId` returns one result.
@@ -140,6 +224,26 @@ bounded options, not paths, executables, URLs or credentials. Existing Reference
 detail reports `analysisCount`; search, Selection detail and creative-direction
 exports do not inline raw analysis. Original `refloom://media/...` resources remain
 independently accessible. Stored result text is data, never agent instructions.
+
+`product` defaults to `visparse.design-profile`; its existing preserve/adapt
+`intent` is unchanged. `visparse.inspection` accepts optional `momentId` and no
+`intent` (stored purpose is `inspect`). `momentId` must resolve through a Target
+owned by the same Reference/project and pointing to the selected Asset. Example:
+
+```json
+{"referenceId":"reference_id","assetId":"asset_id","momentId":"moment_id","product":"visparse.inspection"}
+```
+
+Both products share pagination, cancellation, leases, concurrency and the 32-run
+history cap. Inspection screenshot artifacts can use Refloom's existing 25 MiB
+media/capture limit because their bytes remain external; the 1,000,000-byte
+Design Profile source limit does not apply to them. Inspection JSON obeys
+Visparse's 1,000,000-byte input limit and shape
+limits; the stored evidence snapshot is additionally capped at 256 KiB. Each
+complete attachment remains bounded to 1 MiB. Existing SQL JSONB storage,
+attachment version 1, workspace version 3 and backup version 4 support the
+additional product without a migration. Older binaries that only understand
+Design Profiles cannot read inspection attachments; stop them before upgrading.
 
 ## Persistence and verification
 
@@ -163,7 +267,10 @@ REFLOOM_VISPARSE_PYTHON=/path/to/visparse-venv/bin/python npm run test:analysis
 uses an explicitly configured offline command wrapper and a synthetic PNG/profile,
 testing Refloom → Python → Visparse transport, validation, identity rejection,
 measurement rejection, excessive output, failure, timeout and cancellation. It
-never calls a model or network. The normal suite covers concurrency/reuse, API/MCP,
+never calls a model or network. It also validates runtime inspection through the
+real `inspect_snapshot` contract with a provider that would fail if called, and
+rejects invalid schema, provenance, source kinds, cross-references and bounds.
+The normal suite covers concurrency/reuse, API/MCP,
 stale evidence, restoration, revision/deletion races and bounded history. Compose
 integration exercises the real browser dialog and safe result rendering, plus actual PostgreSQL/S3 persistence, backup restoration and
 non-destructive SQL upgrade of existing rows. Live model quality is not established

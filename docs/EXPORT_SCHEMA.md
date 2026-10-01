@@ -110,6 +110,10 @@ This restore format contains:
   `settings.automaticWebsiteCapture` and arrays named `projects`, `references`,
   `assets`, `targets`, `moments`, `selections`, `boards`, and `signals`. Every
   Reference carries its canonical `tags` array and may include bounded `analyses` attachments.
+  Attachment version 1 supports `visparse.design-profile` and `visparse.inspection`;
+  inspection retains an exact Asset/optional Target/Moment provenance snapshot and
+  canonical supplied-evidence bundle. Stale snapshots remain readable, and imported
+  attachments remain untrusted derived evidence. See [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md).
 - `binaries`: records with exactly `id`, MIME `type`, original `name`, byte
   `size`, lowercase `sha256`, and canonical base64 `data`. Every asset locator
   `blob:<id>` must have one matching binary record and no orphan is allowed.
