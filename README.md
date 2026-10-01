@@ -8,6 +8,9 @@ used, the relevant aspect, and the creator's intent.
 The authoritative long-term product model and its distinction from current 0.1
 behavior are in [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md).
 
+For repository contributions, follow the [development flow](docs/development-flow.md)
+and [review guidelines](docs/review-guidelines.md).
+
 ## Prerequisites
 
 - Docker Desktop with Docker Compose (recommended), or Node.js 22+, PostgreSQL,
