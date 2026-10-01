@@ -217,23 +217,30 @@ test('stored analysis survives PostgreSQL reload and S3 backup; another process 
   const store = repository(); await store.initialize(); t.after(() => store.close());
   let workspace = createProject(createWorkspace(), { id: 'analysis_p', title: 'Analysis' });
   workspace = createReference(workspace, { id: 'analysis_r', projectId: 'analysis_p', captureMethod: 'website-capture' });
-  workspace = createAsset(workspace, { id: 'analysis_a', referenceId: 'analysis_r', kind: 'image', mediaType: 'image/png', locator: 'blob:analysis_media', provenance: { captureMethod: 'website', mode: 'viewport' } });
+  workspace = createAsset(workspace, { id: 'analysis_a', referenceId: 'analysis_r', kind: 'image', mediaType: 'image/png', locator: 'blob:analysis_media', provenance: { captureMethod: 'automated-browser', mode: 'viewport', capturedAt: '2026-09-01T00:00:00.000Z', viewport: { width: 1280, height: 720 } } });
   await store.commit((await store.load()).revision, workspace, [{ id: 'analysis_media', data: png, type: 'image/png', name: 'capture.png' }]);
-  let calls = 0;
+  let calls = 0, inspections = 0;
   const runner = { enabled: true, configuration: 'fixture', timeoutMs: 10000, info: async () => ({ version: 'fixture' }),
-    analyze: async () => { calls++; return { version: 'fixture', result: profile(digest(png)) }; } };
+    analyze: async () => { calls++; return { version: 'fixture', result: profile(digest(png)) }; },
+    inspect: async bundle => { inspections++; return { version: 'fixture', result: bundle }; } };
   const service = new AnalysisService({ store, runner }); t.after(() => service.close());
   const input = { referenceId: 'analysis_r', assetId: 'analysis_a' };
   const job = await service.request(input); await Promise.all([...service.jobs.values()].map(j => j.promise));
   assert.equal((await service.get(input.referenceId, job.id)).status, 'complete');
+  const inspectionInput = { ...input, product: 'visparse.inspection' };
+  const inspection = await service.request(inspectionInput); await Promise.all([...service.jobs.values()].map(j => j.promise));
+  const inspectionResult = await service.get(input.referenceId, inspection.id);
+  assert.equal(inspectionResult.status, 'complete');
   const backup = await store.exportBackup();
   const freshStore = repository(); await freshStore.initialize(); t.after(() => freshStore.close());
   const other = new AnalysisService({ store: freshStore, runner }); t.after(() => other.close());
   assert.equal((await other.request(input)).id, job.id); assert.equal(calls, 1);
+  assert.equal((await other.request(inspectionInput)).id, inspection.id); assert.equal(inspections, 1);
   await store.commit((await store.load()).revision, createWorkspace());
   await assert.rejects(other.get(input.referenceId, job.id), { code: 'ANALYSIS_NOT_FOUND' });
   await store.importBackup((await store.load()).revision, backup);
   assert.deepEqual((await other.get(input.referenceId, job.id)).result, profile(digest(png)));
+  assert.deepEqual((await other.get(input.referenceId, inspection.id)).result, inspectionResult.result);
   assert.deepEqual((await freshStore.mediaInfo('analysis_media')).contents, png);
 });
 

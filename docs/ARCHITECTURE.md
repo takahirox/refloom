@@ -136,5 +136,10 @@ migration decisions and `EXPORT_SCHEMA.md` for portable interchange contracts.
 manual analysis runs. `visparse-runner.js` and `scripts/visparse-bridge.py` invoke
 a configured Visparse installation through a bounded process boundary. The
 `reference-analysis.js` attachment contract is portable and browser-safe.
+`inspection-evidence.js` maps exact stored Asset/Moment provenance into Visparse's
+supplied inspection contract. The bridge validates that bundle without a model
+or browser call; the same attachments and lifecycle store its result. Guided logs
+and passive Moments lack the interval/session evidence for interaction profiles,
+which return an explicit unsupported outcome.
 References remain project-owned; analysis is not an ownership migration. See
 [REFERENCE_ANALYSIS.md](REFERENCE_ANALYSIS.md) for lifecycle and evidence boundaries.

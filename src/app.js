@@ -363,6 +363,19 @@ async function analysisEditor(reference) {
   const assets = workspace.assets.filter(a => a.referenceId === reference.id && a.kind === 'image' && ['image/png', 'image/jpeg'].includes(a.mediaType) && blobIdFromLocator(a.locator));
   const asset = element('select', { 'aria-label': 'Image to analyze' }, assets.map(a => element('option', { value: a.id, text: a.provenance?.filename || a.id })));
   const intent = element('select', { 'aria-label': 'Analysis purpose' }, [element('option', { value: 'preserve', text: 'Preserve appearance' }), element('option', { value: 'adapt', text: 'Adapt principles' })]);
+  const product = element('select', { 'aria-label': 'Analysis product' }, [
+    element('option', { value: 'visparse.design-profile', text: 'Image design profile' }),
+    element('option', { value: 'visparse.inspection', text: 'Stored runtime inspection (no model call)' })
+  ]);
+  const moment = element('select', { 'aria-label': 'Capture provenance to inspect' });
+  function updateScope() {
+    moment.replaceChildren(element('option', { value: '', text: 'Asset capture provenance' }), ...workspace.moments.filter(m =>
+      workspace.targets.some(t => t.id === m.targetId && t.referenceId === reference.id && t.assetId === asset.value)
+    ).map(m => element('option', { value: m.id, text: `${m.label || m.id} · ${m.state?.capturedAt || 'unknown time'}` })));
+    moment.hidden = product.value !== 'visparse.inspection';
+    intent.hidden = product.value === 'visparse.inspection';
+    start.textContent = product.value === 'visparse.inspection' ? 'Inspect stored capture' : 'Analyze selected image';
+  }
   const force = element('input', { type: 'checkbox' });
   const status = element('p', { role: 'status', 'aria-live': 'polite' });
   const history = element('div');
@@ -374,8 +387,8 @@ async function analysisEditor(reference) {
   const close = element('button', { type: 'button', text: 'Close' });
   const modal = element('dialog', { className: 'analysis-dialog', 'aria-label': 'Reference analysis' }, [
     element('h2', { text: 'Reference analysis' }),
-    element('p', { text: 'Analysis sends one PNG/JPEG image (up to 1,000,000 bytes) to the configured analyzer. Results are derived interpretations, separate from the original evidence. Matching results are reused.' }),
-    asset, intent, element('label', {}, [force, document.createTextNode(' Run again even if a matching result exists')]), start, status, preview, history, summary, rawDetails, close
+    element('p', { text: 'Image design analysis sends one PNG/JPEG (up to 1,000,000 bytes) to the configured analyzer. Runtime inspection validates stored capture metadata without a model call. DOM/CSS, accessibility, Three.js scenes and interaction sequences are unavailable. Capture and analysis are separate requests. Matching results are reused.' }),
+    asset, product, moment, intent, element('label', {}, [force, document.createTextNode(' Run again even if a matching result exists')]), start, status, preview, history, summary, rawDetails, close
   ]);
   document.body.append(modal);
   let timer;
@@ -397,8 +410,9 @@ async function analysisEditor(reference) {
     try {
       const data = await repository.analyses(reference.id);
       if (!modal.open) return;
-      start.disabled = !data.enabled || !assets.length;
-      status.textContent = !data.enabled ? 'Analysis is not configured. Stored results remain readable.' : !assets.length ? 'Attach a PNG or JPEG image to analyze.' : `${data.total} analysis runs`;
+      const enabled = product.value === 'visparse.inspection' ? data.inspectionEnabled ?? data.enabled : data.enabled;
+      start.disabled = !enabled || !assets.length;
+      status.textContent = !enabled ? 'Analysis is not configured. Stored results remain readable.' : !assets.length ? 'Attach a PNG or JPEG image to analyze.' : `${data.total} analysis runs`;
       history.replaceChildren(...data.items.map(item => {
         const view = element('button', { type: 'button', text: 'View analysis' });
         view.addEventListener('click', async () => {
@@ -409,7 +423,10 @@ async function analysisEditor(reference) {
             summary.replaceChildren(
               element('h3', { text: 'Derived analysis' }),
               element('p', { text: result.stale ? 'This result describes earlier evidence.' : `Status: ${result.status}` }),
-              ...(!profile ? [] : [
+              ...(!profile ? [] : profile.captures ? [
+                element('p', { text: `Validated supplied evidence: ${profile.captures.map(c => c.kind).join(', ')}. No behavioral measurements or inferred UX transitions.` }),
+                element('p', { text: 'DOM, CSS, accessibility, Three.js and action/transition evidence: unavailable.' })
+              ] : [
                 element('h4', { text: 'Observations' }),
                 ...profile.observations.filter(o => o && typeof o.statement === 'string').map(o => element('p', { text: o.statement })),
                 element('h4', { text: 'Interpretations' }),
@@ -419,7 +436,10 @@ async function analysisEditor(reference) {
                 })
               ])
             );
-            asset.value = result.assetId; await showAsset(result.assetId);
+            asset.value = result.assetId; product.value = result.product; updateScope();
+            if (result.momentId) moment.value = result.momentId;
+            await showAsset(result.assetId);
+            await refresh();
           }
           catch (error) { status.textContent = error.message; }
         });
@@ -428,17 +448,20 @@ async function analysisEditor(reference) {
           try { await repository.analysis(reference.id, item.id, true); await refresh(); }
           catch (error) { status.textContent = error.message; }
         });
-        return element('div', { className: 'analysis-entry' }, [element('p', { text: `${item.status}${item.stale ? ' (stale evidence)' : ''} · ${item.intent} · ${new Date(item.createdAt).toLocaleString()}${item.code ? ` · ${item.code}` : ''}` }), view, cancel]);
+        return element('div', { className: 'analysis-entry' }, [element('p', { text: `${item.status}${item.stale ? ' (stale evidence)' : ''} · ${item.product} · ${item.intent} · ${new Date(item.createdAt).toLocaleString()}${item.code ? ` · ${item.code}` : ''}` }), view, cancel]);
       }));
       if (data.items.some(i => i.status === 'running')) timer = setTimeout(refresh, 1500);
     } catch (error) { if (modal.open) status.textContent = error.message; }
   }
   start.addEventListener('click', async () => {
     start.disabled = true;
-    try { await repository.requestAnalysis({ referenceId: reference.id, assetId: asset.value, intent: intent.value, force: force.checked }); force.checked = false; await refresh(); }
+    try { await repository.requestAnalysis({ referenceId: reference.id, assetId: asset.value, product: product.value,
+      ...(product.value === 'visparse.inspection' ? (moment.value ? { momentId: moment.value } : {}) : { intent: intent.value }), force: force.checked }); force.checked = false; await refresh(); }
     catch (error) { status.textContent = error.message; start.disabled = false; }
   });
-  asset.addEventListener('change', () => showAsset(asset.value));
+  asset.addEventListener('change', () => { updateScope(); showAsset(asset.value); });
+  product.addEventListener('change', () => { updateScope(); refresh(); });
+  updateScope();
   close.addEventListener('click', () => modal.close());
   modal.addEventListener('close', async () => {
     clearTimeout(timer); if (previewUrl) URL.revokeObjectURL(previewUrl); modal.remove(); returnFocus?.focus();
