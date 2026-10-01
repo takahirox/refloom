@@ -6,9 +6,9 @@ import { RevisionConflictError } from '../src/persistence-errors.js';
 import { digest } from '../src/visparse-runner.js';
 import { decodeBackup, encodeBackup } from '../src/storage.js';
 import { rowsToWorkspace, workspaceToRows } from '../src/postgres-workspace-mapper.js';
-import { profile, png } from './fixtures/analysis-profile.mjs';
+import { profile, png } from '../fixtures/analysis-profile.mjs';
 
-import { MemoryStore } from './fixtures/analysis-store.mjs';
+import { MemoryStore } from '../fixtures/analysis-store.mjs';
 
 const request = { referenceId: 'r', assetId: 'a' };
 function fixture(analyze) {

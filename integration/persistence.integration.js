@@ -1,19 +1,19 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createMcpServer } from '../../mcp-server.mjs';
-import { createRefloomServer } from '../../server.mjs';
-import { createPersistenceRepository } from '../../src/create-persistence-repository.js';
+import { createMcpServer } from '../mcp-server.mjs';
+import { createRefloomServer } from '../server.mjs';
+import { createPersistenceRepository } from '../src/create-persistence-repository.js';
 import {
   createAsset, createBoard, createProject, createReference, createSelection,
   createTarget, createWorkspace
-} from '../../src/domain.js';
-import { RevisionConflictError } from '../../src/persistence-errors.js';
-import { captureReference } from '../../src/website-capture-service.js';
-import { AnalysisService } from '../../src/analysis-service.js';
-import { digest } from '../../src/visparse-runner.js';
+} from '../src/domain.js';
+import { RevisionConflictError } from '../src/persistence-errors.js';
+import { captureReference } from '../src/website-capture-service.js';
+import { AnalysisService } from '../src/analysis-service.js';
+import { digest } from '../src/visparse-runner.js';
 import { profile, png } from '../fixtures/analysis-profile.mjs';
-import { readMigrations, runPostgresMigrations } from '../../src/postgres-migrations.js';
+import { readMigrations, runPostgresMigrations } from '../src/postgres-migrations.js';
 import pg from 'pg';
 
 function repository() {

@@ -4,10 +4,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createVisparseRunner } from '../src/visparse-runner.js';
 import { AnalysisService } from '../src/analysis-service.js';
-import { MemoryStore } from './fixtures/analysis-store.mjs';
-import { png } from './fixtures/analysis-profile.mjs';
+import { MemoryStore } from '../fixtures/analysis-store.mjs';
+import { png } from '../fixtures/analysis-profile.mjs';
 
-const executable = fileURLToPath(new URL('./fixtures/analysis-agent.mjs', import.meta.url));
+const executable = fileURLToPath(new URL('../fixtures/analysis-agent.mjs', import.meta.url));
 const environment = mode => ({ ...process.env, DATABASE_URL: 'must-not-reach-analyzer', REFLOOM_S3_SECRET_ACCESS_KEY: 'test-secret', REFLOOM_ANALYSIS_ENABLED: '1', REFLOOM_VISPARSE_AGENT: 'command', REFLOOM_VISPARSE_EXECUTABLE: executable, REFLOOM_VISPARSE_INHERIT_ENV: 'ANALYSIS_FIXTURE_MODE', ANALYSIS_FIXTURE_MODE: mode || '', REFLOOM_ANALYSIS_TIMEOUT_SECONDS: mode === 'timeout' ? '1' : '10' });
 
 test('real Visparse command transport validates and persists a stored fixture through Refloom', async () => {

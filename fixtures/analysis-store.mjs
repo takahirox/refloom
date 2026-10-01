@@ -1,6 +1,6 @@
-import { createAsset, createProject, createReference, createWorkspace, importWorkspace } from '../../src/domain.js';
-import { RevisionConflictError } from '../../src/persistence-errors.js';
-import { decodeBackup, encodeBackup } from '../../src/storage.js';
+import { createAsset, createProject, createReference, createWorkspace, importWorkspace } from '../src/domain.js';
+import { RevisionConflictError } from '../src/persistence-errors.js';
+import { decodeBackup, encodeBackup } from '../src/storage.js';
 import { png } from './analysis-profile.mjs';
 export class MemoryStore {
   constructor() {
