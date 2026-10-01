@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Explicit offline Visparse command wrapper. Never calls a model or network.
+// Keep this stdin-driven executable extensionless so node --test does not discover it.
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { profile } from './analysis-profile.mjs';
