@@ -20,6 +20,14 @@ English-language rule for repository collaboration and documentation.
 Verify every requirement of an Issue the PR claims to resolve. Do not approve
 closing the Issue while required work remains unresolved.
 
+Distinguish mandatory pre-merge acceptance from required post-merge
+verification. Pre-merge criteria must be achievable and verifiable before
+merge. Checks possible only after merge must not be prerequisites for pre-merge
+PR approval. Verify implementation requirements and applicable pre-merge tests,
+and ensure required post-merge checks are recorded separately as pending until
+performed. A PR may be approved with those checks pending, but must leave the
+Issue open until all requirements are satisfied.
+
 If the PR is intentionally partial, it must clearly state what it addresses
 and what remains. Assess it against that stated scope and leave the source
 Issue open.
@@ -40,14 +48,23 @@ completely solves the stated problem.
 ## Check the Result
 
 Verify that behavior matches the expected outcome, the implementation fits the
-existing architecture, required checks pass, and validation is sufficient for
-the change. Update documentation when documented behavior changes.
+existing architecture, required pre-merge checks pass, and validation is
+sufficient for the change. Update documentation when documented behavior changes.
+
+For a merge-triggered deployment, review code/configuration, local builds,
+and applicable automated test results before merge. Verification of deployment
+and the newly published site follows merge. Check that validation reporting
+separates these pending post-merge checks from completed pre-merge results and
+does not imply that unperformed checks passed.
 
 ## Review Outcome
 
 A PR is ready to merge when it fully addresses the scope it claims to resolve,
 adds no unjustified scope or complexity, and is correct and appropriately
-validated. Request changes if any condition is unmet, then review the revision.
+validated before merge. Required post-merge verification may remain pending
+without blocking approval when it is separately recorded and accurately
+reported. Request changes if any pre-merge condition is unmet or validation
+reporting is inaccurate, then review the revision.
 Partial PRs must not present the source Issue as resolved.
 
 Adapted from [GitWeave's review guidelines](https://github.com/takahirox/gitweave/blob/main/docs/review-guidelines.md).

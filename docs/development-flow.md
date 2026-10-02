@@ -14,6 +14,8 @@ Review
 Revision if needed
   ↓
 Merge
+  ↓
+Required post-merge verification, if any
 ```
 
 ## 1. Start with an Issue
@@ -31,6 +33,17 @@ When human work is required, state why it is necessary and what result is
 expected. Distinguish optional additional validation from mandatory completion
 criteria.
 
+Mandatory pre-merge acceptance criteria must be achievable and verifiable
+before merge. Record required checks possible only after merge separately as
+post-merge verification; they must not be prerequisites for pre-merge PR
+approval. This distinction preserves implementation requirements and
+applicable pre-merge tests.
+
+For example, when deployment is triggered by merge, validate code/configuration,
+local builds, and applicable automated tests before merge. Verify deployment
+and the newly published site after merge. Report that post-merge verification
+as pending until performed, then record the actual results.
+
 ## 2. Implement and Open a Pull Request
 
 **Complete, but no more.** Prefer the smallest change that fully satisfies the
@@ -44,9 +57,16 @@ repository's required checks and validation appropriate to the change; see
 [Fleet verification requirements](../.fleet/project.yaml). Record results and
 any validation gaps in the PR.
 
+Report pre-merge validation results separately from required post-merge
+verification, which remains pending until performed. Never report an
+unperformed check as passed.
+
 A PR should only claim to close an Issue when it fully addresses that Issue.
 For intentionally partial work, state what is covered and what remains, link
 the Issue without closing language, and leave it open.
+If required post-merge verification remains pending, state that explicitly and
+leave the Issue open until it is satisfied; this does not prevent PR approval
+once implementation and pre-merge acceptance are complete.
 
 ## 3. Review Before Merge
 
@@ -63,8 +83,17 @@ presenting the source Issue as resolved.
 
 ## 5. Merge
 
-Merge after review passes and the required checks pass for the reviewed change.
+Merge after review passes and the required pre-merge checks pass for the
+reviewed change.
 Close an Issue only when its requirements are fully satisfied.
+
+## 6. Perform Required Post-merge Verification
+
+Perform the separately recorded post-merge checks after merge, such as verifying
+a merge-triggered deployment and the newly published site. Keep them pending
+until performed, record their actual results and any remaining gaps, and address
+failures. Close the Issue only when required post-merge verification is also
+satisfied.
 
 ## Repository Language
 
