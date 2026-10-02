@@ -23,6 +23,14 @@ Describe the problem, expected outcome, and relevant context using the
 If requirements are unclear, clarify the Issue before implementation instead
 of inventing requirements during the change.
 
+By default, completion criteria should be executable and verifiable by an AI
+agent. Require human checks, such as physical-device testing, subjective
+evaluation, or external approval, only when there is a necessary reason to do so.
+
+When human work is required, state why it is necessary and what result is
+expected. Distinguish optional additional validation from mandatory completion
+criteria.
+
 ## 2. Implement and Open a Pull Request
 
 **Complete, but no more.** Prefer the smallest change that fully satisfies the
