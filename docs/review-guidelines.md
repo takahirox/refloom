@@ -51,6 +51,8 @@ Verify that behavior matches the expected outcome, the implementation fits the
 existing architecture, required pre-merge checks pass, and validation is
 sufficient for the change. Update documentation when documented behavior changes.
 
+Review applicable interface changes against the [UI/UX principles](../README.md#uiux).
+
 For a merge-triggered deployment, review code/configuration, local builds,
 and applicable automated test results before merge. Verification of deployment
 and the newly published site follows merge. Check that validation reporting

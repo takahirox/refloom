@@ -184,6 +184,22 @@ provenance, source URLs, notes, and base64-encoded captured media, so treat it a
 sensitive. Import replaces the current workspace after confirmation; export a
 current backup and inspect the source of any file before importing it.
 
+## UI/UX
+
+These principles apply to Refloom's browser interface, MCP tools, commands,
+messages, and usage examples.
+
+1. **Keep it simple.** Show only necessary information and actions; avoid
+   unnecessary UI elements.
+2. **Show, don't tell.** Prefer layout, spacing and visual hierarchy over
+   explanatory labels or prose to communicate structure.
+3. **Intuitive and predictable.** Keep appearance and behavior consistent with
+   user expectations; don't interrupt the user's work.
+
+Preserve necessary control labels, accessible names, error messages, and
+information needed to use the interface. Simplification must preserve meaningful
+consent, destructive-action safeguards, and necessary warnings.
+
 ## Accessibility
 
 The interface uses semantic landmarks, associated labels, keyboard-operable
