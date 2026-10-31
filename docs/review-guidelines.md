@@ -53,6 +53,13 @@ sufficient for the change. Update documentation when documented behavior changes
 
 Review applicable interface changes against the [UI/UX principles](../README.md#uiux).
 
+Apply the [test and CI principles](development-flow.md#test-and-ci-principles).
+For new or expanded checks, review additional defect coverage, duplication with
+existing checks, and execution and maintenance cost. Ask:
+
+> Does this change provide sufficient confidence with the lightest appropriate
+> validation, without redundant execution?
+
 For a merge-triggered deployment, review code/configuration, local builds,
 and applicable automated test results before merge. Verification of deployment
 and the newly published site follows merge. Check that validation reporting
