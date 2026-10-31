@@ -9,7 +9,8 @@ The authoritative long-term product model and its distinction from current 0.1
 behavior are in [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md).
 
 For repository contributions, follow the [development flow](docs/development-flow.md)
-and [review guidelines](docs/review-guidelines.md).
+and [review guidelines](docs/review-guidelines.md), including the
+[test and CI principles](docs/development-flow.md#test-and-ci-principles).
 
 ## Prerequisites
 
