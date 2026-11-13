@@ -1,6 +1,0 @@
-.git
-.github
-coverage
-node_modules
-tmp
-*.log
