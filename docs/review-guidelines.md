@@ -17,16 +17,22 @@ English-language rule for repository collaboration and documentation.
 
 ## Check for Missing Work
 
-Verify every requirement of an Issue the PR claims to resolve. Do not approve
-closing the Issue while required work remains unresolved.
+Verify every implementation requirement of an Issue the PR claims to resolve.
+Missing implementation, mandatory pre-merge tests, required protections, and
+genuinely necessary pre-merge human acceptance remain blockers.
 
 Distinguish mandatory pre-merge acceptance from required post-merge
 verification. Pre-merge criteria must be achievable and verifiable before
 merge. Checks possible only after merge must not be prerequisites for pre-merge
 PR approval. Verify implementation requirements and applicable pre-merge tests,
 and ensure required post-merge checks are recorded separately as pending until
-performed. A PR may be approved with those checks pending, but must leave the
-Issue open until all requirements are satisfied.
+performed. Once implementation and mandatory pre-merge acceptance are complete,
+preserve the normal `Closes #N` reference and close the Issue after successful
+merge. Pending post-merge-only verification does not make implementation partial.
+Do not request removing the reference, keeping the Issue open, or withholding
+approval solely for those pending checks: this causes the ProjectWeave
+Review -> Fix -> Publish -> Review loop described in the
+[development flow](development-flow.md#3-review-before-merge).
 
 If the PR is intentionally partial, it must clearly state what it addresses
 and what remains. Assess it against that stated scope and leave the source
@@ -75,5 +81,12 @@ without blocking approval when it is separately recorded and accurately
 reported. Request changes if any pre-merge condition is unmet or validation
 reporting is inaccurate, then review the revision.
 Partial PRs must not present the source Issue as resolved.
+
+Apply the [post-merge follow-up guidance](development-flow.md#6-perform-required-post-merge-verification):
+record accurate evidence after merge and closure, use a new or existing equivalent
+linked Issue for an actual defect, and do not reopen the original solely for that
+follow-up. An environment-blocked check alone is not a product defect. Require
+post-merge checks only when the actual change needs them; do not add routine
+manual, device, model-download, or deployment gates to documentation edits.
 
 Adapted from [GitWeave's review guidelines](https://github.com/takahirox/gitweave/blob/main/docs/review-guidelines.md).

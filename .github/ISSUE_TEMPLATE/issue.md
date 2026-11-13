@@ -30,11 +30,16 @@ and applicable automated tests before merge.
 
 ### Required post-merge verification
 
-Record checks possible only after merge separately, or state that none apply.
+Record checks possible only after merge that the change actually needs, or state
+that none apply.
 These checks must not be prerequisites for pre-merge PR approval. For the
 deployment example, verify deployment and the newly published site after merge.
 Report required post-merge verification as pending until performed, then record
 the actual results; do not imply that pending checks passed.
+After successful merge, close the fully implemented Issue before performing these
+checks. Follow the
+[post-merge evidence and defect guidance](https://github.com/takahirox/refloom/blob/main/docs/development-flow.md#6-perform-required-post-merge-verification)
+for accurate reporting and new linked defect Issues instead of reopening this one.
 
 ## Context
 
